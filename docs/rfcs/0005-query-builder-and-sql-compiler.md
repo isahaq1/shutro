@@ -416,3 +416,21 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 - Materialized-view models and report models backed by SQL views (`view: sql\`…\``).
 - Replica routing hints per query (driver RFC).
 - The `parent_path` maintenance mechanism for hierarchy models (business-features RFC).
+
+---
+
+## Implementation notes (2026-10-14, layer 2: the typed builder)
+
+`packages/sql/src/builder/`. Where the implementation refines §7.7:
+
+1. **Schema source.** Until `shutro generate` exists, the builder is generic over a user-written schema interface
+   (`{ table: { column: type } }`). The generator will emit the same shape, so user code doesn't change.
+2. **One AST, really.** The builder produces `sql` fragments and compiles through the same renderer as the tag; there is
+   no second code path for values or identifiers. That also means `eb.sql(fragment)` is the only raw escape.
+3. **`in` / `not in` render as `= ANY($n)` / `<> ALL($n)`** with the list as one parameter (R6, stable text). Empty lists
+   fold to `FALSE` / `TRUE`. Sub-queries render as `IN (SELECT …)`.
+4. **Record rules (`.withRules`) are deferred** to the registry: the builder can't tell model tables from other tables yet.
+   The AST walk the check needs (`visit`) exists.
+5. **Not implemented in v1 of the builder:** window functions, `FILTER`, `ROLLUP` / `CUBE`, `ON CONFLICT`, derived tables.
+   `eb.sql` covers them meanwhile.
+6. **Insert column order** is first appearance across the given rows; missing keys become `DEFAULT`.
