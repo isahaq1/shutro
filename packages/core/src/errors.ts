@@ -15,7 +15,8 @@ export type ShutroErrorCode =
   | 'CONCURRENT_UPDATE'
   | 'INVALID_IDENTITY'
   | 'COMPANY_NOT_ALLOWED'
-  | 'FLAG_NOT_ALLOWED';
+  | 'FLAG_NOT_ALLOWED'
+  | 'INVALID_FIELD';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -158,6 +159,13 @@ export class CompanyNotAllowedError extends ShutroError {
       `Company ${company} is not among the allowed companies [${allowed.join(', ')}] of this environment.`,
       'Select the company in the session (allowed companies), or run the operation under env.asSuperuser({ reason }, ...) if it is a system task.',
     );
+  }
+}
+
+/** A field definition that can't be right (RFC 0001): bad size, scale, selection, transition, relation option, ... */
+export class InvalidFieldError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('INVALID_FIELD', problem, hint);
   }
 }
 
