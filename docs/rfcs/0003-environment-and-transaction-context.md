@@ -429,3 +429,27 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 - Connection layer details (driver choice, pool sizing, replica routing): driver RFC (Phase 1 benchmark).
 - Outbox schema and relay: events RFC.
 - RLS policy generation: security RFC.
+
+---
+
+## Implementation notes (2026-10-14, `@shutro/core` env layer, first step)
+
+Implemented in `packages/core/src/env/` without models or the registry. Where the implementation refines this RFC:
+
+1. **No global state.** `createShutro({ driver })` returns an instance owning its own `AsyncLocalStorage`. There is no
+   module-level `shutro` singleton; applications create one per driver.
+2. **`Env.sql`** is the raw-SQL entry point for now (RFC 0005 §7.8 rules apply: values become parameters). `env.model()`,
+   `env.user` / `env.company` records and module-contributed flags arrive with the registry (RFC 0002).
+3. **Time:** `env.now()` returns a `Date` copy and `env.today()` a `'YYYY-MM-DD'` string until `Instant` / `CalendarDate`
+   exist (RFC 0001 Q3). `now()` costs one `SELECT now()` per attempt, separate from the settings round-trip; folding it
+   into the driver's settings statement is a later optimization.
+4. **Savepoint hooks:** `afterCommit` hooks registered inside a savepoint are merged into the parent when the savepoint is
+   released and discarded when it rolls back. `onRollback` hooks of a rolled-back savepoint run immediately.
+5. **Scope checks (§7.7)** are implemented in this order: scope ended → nested savepoint active on this connection →
+   another transaction active in the async context. A lost async context is never an error on its own.
+6. **Retry (Q1 resolved):** on by default, `retry: false` per run. `env.attempt` tells hooks and logs which attempt they
+   belong to. Read-only violations and other non-retryable driver errors surface unchanged after one attempt.
+7. **Settings** use lower-case names (`timezone`, not `TimeZone`), because the driver validates setting names strictly
+   and PostgreSQL treats them case-insensitively.
+8. **Superuser** (`asSuperuser`) is scoped to the callback. Rebinding returned recordsets to the caller's env (`Rebound<T>`)
+   waits for recordsets; today plain values are returned as is.

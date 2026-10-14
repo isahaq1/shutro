@@ -9,7 +9,13 @@ export type ShutroErrorCode =
   | 'MONEY_EMPTY_SUM'
   | 'INVALID_UOM'
   | 'UOM_MISMATCH'
-  | 'UOM_CATEGORY_MISMATCH';
+  | 'UOM_CATEGORY_MISMATCH'
+  | 'NO_ENVIRONMENT'
+  | 'TRANSACTION_SCOPE'
+  | 'CONCURRENT_UPDATE'
+  | 'INVALID_IDENTITY'
+  | 'COMPANY_NOT_ALLOWED'
+  | 'FLAG_NOT_ALLOWED';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -21,8 +27,16 @@ export class ShutroError extends Error {
   /** How to fix the problem. Also included at the end of `message`. */
   readonly hint: string;
 
-  constructor(code: ShutroErrorCode, problem: string, hint: string) {
-    super(`${problem} ${hint}`);
+  constructor(
+    code: ShutroErrorCode,
+    problem: string,
+    hint: string,
+    options?: { readonly cause?: unknown },
+  ) {
+    super(
+      `${problem} ${hint}`,
+      options?.cause === undefined ? undefined : { cause: options.cause },
+    );
     this.name = new.target.name;
     this.code = code;
     this.hint = hint;
@@ -96,5 +110,64 @@ export class UomMismatchError extends ShutroError {
 export class IncompatibleUomCategoryError extends ShutroError {
   constructor(problem: string, hint: string) {
     super('UOM_CATEGORY_MISMATCH', problem, hint);
+  }
+}
+
+/** No environment is active (code ran outside `shutro.run()`), RFC 0003 §7.7. */
+export class NoEnvironmentError extends ShutroError {
+  constructor() {
+    super(
+      'NO_ENVIRONMENT',
+      'No Shutro environment is active.',
+      'Wrap the call in shutro.run({ user, company }, (env) => ...) or use the env of an existing recordset.',
+    );
+  }
+}
+
+/** An environment was used outside its transaction scope (RFC 0003 §7.7). */
+export class TransactionScopeError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('TRANSACTION_SCOPE', problem, hint);
+  }
+}
+
+/** Every retry of a transaction hit a serialization failure or deadlock (RFC 0003 §7.5). */
+export class ConcurrentUpdateError extends ShutroError {
+  constructor(attempts: number, cause: unknown) {
+    super(
+      'CONCURRENT_UPDATE',
+      `The transaction conflicted with concurrent transactions on all ${attempts} attempts.`,
+      'Reduce contention: lock records in a consistent order, keep transactions short, or process the data in smaller chunks (shutro.forEachChunk).',
+      { cause },
+    );
+  }
+}
+
+/** Invalid user, company, language, time zone or reason passed to `shutro.run()` or a derived environment. */
+export class InvalidIdentityError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('INVALID_IDENTITY', problem, hint);
+  }
+}
+
+/** `withCompany()` outside the user's allowed companies (RFC 0003 §7.2). */
+export class CompanyNotAllowedError extends ShutroError {
+  constructor(company: number, allowed: readonly number[]) {
+    super(
+      'COMPANY_NOT_ALLOWED',
+      `Company ${company} is not among the allowed companies [${allowed.join(', ')}] of this environment.`,
+      'Select the company in the session (allowed companies), or run the operation under env.asSuperuser({ reason }, ...) if it is a system task.',
+    );
+  }
+}
+
+/** A flag that only a superuser environment may change (RFC 0003 §7.4). */
+export class FlagNotAllowedError extends ShutroError {
+  constructor(flag: string) {
+    super(
+      'FLAG_NOT_ALLOWED',
+      `The flag '${flag}' can only be changed in a superuser environment.`,
+      'Disable it inside env.asSuperuser({ reason }, (su) => su.withFlags({ ... })), and only for system tasks such as migrations.',
+    );
   }
 }
