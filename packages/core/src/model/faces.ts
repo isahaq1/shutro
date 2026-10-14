@@ -8,17 +8,19 @@
 import type { FieldFlags, FieldTypes } from './field.js';
 
 type TypesOf<F> = F extends { readonly '~types'?: infer T } ? NonNullable<T> : never;
-type Flags<F> = TypesOf<F> extends FieldTypes<unknown, unknown, infer Fl> ? Fl : FieldFlags;
+/** The phantom flags of a field descriptor. */
+export type FlagsOfField<F> =
+  TypesOf<F> extends FieldTypes<unknown, unknown, infer Fl> ? Fl : FieldFlags;
 type Read<F> = TypesOf<F> extends FieldTypes<infer R, unknown, FieldFlags> ? R : never;
 type Write<F> = TypesOf<F> extends FieldTypes<unknown, infer W, FieldFlags> ? W : never;
 
-type Required<F> = Flags<F>['required'] extends true ? true : false;
-type Writable<F> = Flags<F>['readonly'] extends true ? false : true;
+type Required<F> = FlagsOfField<F>['required'] extends true ? true : false;
+type Writable<F> = FlagsOfField<F>['readonly'] extends true ? false : true;
 type Mandatory<F> =
   Required<F> extends true
-    ? Flags<F>['hasDefault'] extends true
+    ? FlagsOfField<F>['hasDefault'] extends true
       ? false
-      : Flags<F>['sequence'] extends true
+      : FlagsOfField<F>['sequence'] extends true
         ? false
         : true
     : false;

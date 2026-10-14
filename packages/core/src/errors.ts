@@ -16,7 +16,8 @@ export type ShutroErrorCode =
   | 'INVALID_IDENTITY'
   | 'COMPANY_NOT_ALLOWED'
   | 'FLAG_NOT_ALLOWED'
-  | 'INVALID_FIELD';
+  | 'INVALID_FIELD'
+  | 'INVALID_MODEL';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -166,6 +167,13 @@ export class CompanyNotAllowedError extends ShutroError {
 export class InvalidFieldError extends ShutroError {
   constructor(problem: string, hint: string) {
     super('INVALID_FIELD', problem, hint);
+  }
+}
+
+/** A model definition that can't be right (RFC 0001): reserved keys, column collisions, bad sibling references, ... */
+export class InvalidModelError extends ShutroError {
+  constructor(model: string, problem: string, hint: string) {
+    super('INVALID_MODEL', `Model '${model}': ${problem}`, hint);
   }
 }
 

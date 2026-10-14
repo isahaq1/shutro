@@ -153,7 +153,6 @@ type Params = postgres.ParameterOrJSON<never>[];
  */
 export function createDriver(options: DriverOptions): Driver {
   const prepare = options.prepare ?? true;
-  // biome-ignore lint/complexity/useLiteralKeys: tsconfig noPropertyAccessFromIndexSignature requires bracket access
   const guard = options.checkParamsInText ?? process.env['NODE_ENV'] !== 'production';
   const parseNumeric = options.parseNumeric ?? ((text: string): unknown => text);
   const sql = postgres(options.url, {
