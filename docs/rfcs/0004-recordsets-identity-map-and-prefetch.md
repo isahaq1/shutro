@@ -445,3 +445,26 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 - Compute and recompute scheduling, onchange: compute-engine RFC.
 - Bulk import through `COPY` and partition-aware writes: Phase 5.
 - Cross-transaction caches (registry-level caches for configuration models like taxes and currencies): a separate RFC, because they need invalidation through LISTEN/NOTIFY.
+
+---
+
+## Implementation notes (2026-10-14, recordsets: reads)
+
+`packages/core/src/recordset/`. Where the implementation refines this RFC:
+
+1. **Schema typing without the generator.** `defineModule` / `buildRegistry` are generic, so a registry's type is the
+   schema view of its module tree and `createShutro({ registry })` types `env.model()`. The recursion is guarded against
+   the wide `Module` type (fixtures that return plain `Module` contribute no model types). `shutro generate` will emit
+   the same view (RFC 0002), which also removes the recursion cost for large applications.
+2. **Loaded shapes are exactly spike 0001's `full` design**, including the amendment that a nested object spec loads the
+   relation's defaults. A list spec loads exactly the listed keys plus `id`; on an already-loaded relation it merges.
+3. **`search()` selects the defaults** (Q2 resolved) in one query: stored, non-binary, non-x2many fields.
+4. **Value objects are cached per transaction:** `res.currency` and `uom.uom` records are loaded through the identity map
+   the first time a monetary / quantity field needs them, so `Money` / `Quantity` never cost a query per record. The
+   sibling currency / uom field is added to every load that includes a monetary / quantity field.
+5. **A pending x2many set remembers its own parent and its prefetch group separately**, so `o.lines.load()` inside a loop
+   fetches for the whole group but returns only `o`'s lines (a bug the N+1 test caught).
+6. **Missing ids** on `load()` raise `MissingRecordError` rather than yielding empty values.
+7. **`bigint` fields read as safe numbers** (the driver guards overflow), matching ids.
+8. **Not yet:** writes (`create` / `write` / `unlink`, the unit of work, record-rule-enforcing flushes), non-stored computes
+   on read, `stream()`, `exists()`, `sum()` on monetary fields, `withEnv`, and the full domain compiler.

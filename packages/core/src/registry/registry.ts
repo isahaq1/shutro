@@ -1,6 +1,6 @@
 /**
  * `buildRegistry()` (RFC 0002 §7.4, first half: loading and cross-model checks). Extensions, overrides and mixins
- * come with the second half.
+ * come with the second half. The registry's type is the schema view of every model in the module tree.
  */
 import {
   DuplicateModelError,
@@ -12,7 +12,39 @@ import {
 } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel, FieldDescription, ModelDescription } from '../model/model.js';
-import { isModule, type Module } from './module.js';
+import { isModule, type Module, type ModuleBase } from './module.js';
+
+// ------------------------------------------------------------------------------------------------- schema types
+
+type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
+  x: infer I,
+) => void
+  ? I
+  : never;
+type Simplify<T> = { [K in keyof T]: T[K] } & NonNullable<unknown>;
+/** Models keyed by name; the wide `AnyModel` (name: string) contributes nothing. */
+type ModelsToSchema<M> = {
+  [X in M as X extends { readonly name: infer N extends string }
+    ? string extends N
+      ? never
+      : N
+    : never]: X;
+};
+/** The schema view of one module: its models plus those of its dependencies, recursively. */
+export type SchemaOfModule<M> =
+  M extends Module<infer Ms, infer Deps>
+    ? ModelsToSchema<Ms[number]> & SchemaOfModules<Deps>
+    : NonNullable<unknown>;
+/** The schema view of several modules. */
+export type SchemaOfModules<Mods> = Mods extends readonly [infer H, ...infer T]
+  ? SchemaOfModule<H> & SchemaOfModules<T>
+  : Mods extends readonly (infer U)[]
+    ? ModuleBase extends U
+      ? NonNullable<unknown> // the wide module type carries no model information; stop here
+      : UnionToIntersection<SchemaOfModule<U>>
+    : NonNullable<unknown>;
+
+// ------------------------------------------------------------------------------------------------------ types
 
 /** A model and the module that owns it. */
 export interface RegisteredModel {
@@ -31,10 +63,12 @@ export interface RegistryModelDescription extends Omit<ModelDescription, 'fields
   readonly fields: Readonly<Record<string, FieldDescription & { readonly origin: Origin }>>;
 }
 
-/** The built, frozen registry. */
-export interface Registry {
+/** The built, frozen registry. `S` is the schema view: model name → model type. */
+export interface Registry<S = unknown> {
+  /** Phantom. */
+  readonly '~schema'?: S;
   /** Modules in load order. */
-  readonly modules: readonly Module[];
+  readonly modules: readonly ModuleBase[];
   /** Module names in load order. */
   readonly loadOrder: readonly string[];
   /** Models in load order (modules first, then definition order). */
@@ -47,26 +81,26 @@ export interface Registry {
 }
 
 /** Options of {@link buildRegistry}. */
-export interface RegistryOptions {
+export interface RegistryOptions<Mods extends readonly Module[]> {
   /** The application's modules; their dependencies are collected transitively. */
-  readonly modules: readonly Module[];
+  readonly modules: Mods;
 }
 
 const RELATION_KINDS = new Set(['many2one', 'one2many', 'many2many']);
 
-function targetOf(field: Field): string | undefined {
+/** The target model of a relation field, else `undefined`. */
+export function targetOf(field: Field): string | undefined {
   return RELATION_KINDS.has(field.kind)
     ? (field as unknown as { target: string }).target
     : undefined;
 }
 
 /** Collects every module reachable from the roots and checks that names are unique. */
-function collect(roots: readonly Module[]): Map<string, Module> {
-  const byName = new Map<string, Module>();
-  const visit = (module: Module): void => {
-    if (!isModule(module)) {
+function collect(roots: readonly ModuleBase[]): Map<string, ModuleBase> {
+  const byName = new Map<string, ModuleBase>();
+  const visit = (module: ModuleBase): void => {
+    if (!isModule(module))
       throw new DuplicateModuleError(String((module as { name?: unknown }).name ?? '?'));
-    }
     const known = byName.get(module.name);
     if (known === module) return;
     if (known !== undefined) throw new DuplicateModuleError(module.name);
@@ -78,11 +112,11 @@ function collect(roots: readonly Module[]): Map<string, Module> {
 }
 
 /** Kahn's algorithm with the smallest name first: the order is a pure function of the module set (RFC 0002 R5). */
-function order(byName: ReadonlyMap<string, Module>): Module[] {
+function order(byName: ReadonlyMap<string, ModuleBase>): ModuleBase[] {
   const remaining = new Map<string, Set<string>>();
   for (const [name, module] of byName)
     remaining.set(name, new Set(module.depends.map((d) => d.name)));
-  const result: Module[] = [];
+  const result: ModuleBase[] = [];
   while (remaining.size > 0) {
     const ready = [...remaining.entries()]
       .filter(([, deps]) => deps.size === 0)
@@ -102,9 +136,9 @@ function order(byName: ReadonlyMap<string, Module>): Module[] {
 }
 
 /** Transitive dependency names of a module, including itself. */
-function closure(module: Module): Set<string> {
+function closure(module: ModuleBase): Set<string> {
   const names = new Set<string>();
-  const walk = (m: Module): void => {
+  const walk = (m: ModuleBase): void => {
     if (names.has(m.name)) return;
     names.add(m.name);
     for (const dep of m.depends) walk(dep);
@@ -120,7 +154,9 @@ function closure(module: Module): Set<string> {
  * @throws {DuplicateModuleError} {DuplicateModelError} {UnknownModelError} {UndeclaredDependencyError}
  * {InvalidRelationError} {InvalidDependsPathError}
  */
-export function buildRegistry(options: RegistryOptions): Registry {
+export function buildRegistry<const Mods extends readonly Module[]>(
+  options: RegistryOptions<Mods>,
+): Registry<Simplify<SchemaOfModules<Mods>>> {
   const modules = order(collect(options.modules));
   const models = new Map<string, RegisteredModel>();
   for (const module of modules) {
@@ -190,7 +226,7 @@ export function buildRegistry(options: RegistryOptions): Registry {
     }
   }
 
-  const registry: Registry = {
+  const registry: Registry<Simplify<SchemaOfModules<Mods>>> = {
     modules: Object.freeze(modules),
     loadOrder: Object.freeze(modules.map((m) => m.name)),
     models,

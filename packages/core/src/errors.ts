@@ -24,7 +24,12 @@ export type ShutroErrorCode =
   | 'UNDECLARED_DEPENDENCY'
   | 'UNKNOWN_MODEL'
   | 'INVALID_RELATION'
-  | 'INVALID_DEPENDS_PATH';
+  | 'INVALID_DEPENDS_PATH'
+  | 'FIELD_NOT_LOADED'
+  | 'SINGLETON'
+  | 'MISSING_RECORD'
+  | 'INVALID_DOMAIN'
+  | 'NO_REGISTRY';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -248,6 +253,55 @@ export class InvalidRelationError extends ShutroError {
 export class InvalidDependsPathError extends ShutroError {
   constructor(problem: string, hint: string) {
     super('INVALID_DEPENDS_PATH', problem, hint);
+  }
+}
+
+/** A field was read before it was loaded (RFC 0004 §7.1). */
+export class FieldNotLoadedError extends ShutroError {
+  constructor(model: string, field: string, hint: string) {
+    super('FIELD_NOT_LOADED', `${model}.${field} is not loaded.`, hint);
+  }
+}
+
+/** `first()` on an empty recordset, or `ensureOne()` on a recordset that isn't exactly one record. */
+export class SingletonError extends ShutroError {
+  constructor(model: string, count: number, what: 'first' | 'ensureOne') {
+    super(
+      'SINGLETON',
+      `${what}() expected one ${model} record but the recordset has ${count}.`,
+      what === 'first'
+        ? 'Check isEmpty() first, or use a search that returns at least one record.'
+        : 'Narrow the search, or iterate the recordset when several records are expected.',
+    );
+  }
+}
+
+/** A browsed id that doesn't exist (or isn't visible). */
+export class MissingRecordError extends ShutroError {
+  constructor(model: string, ids: readonly number[]) {
+    super(
+      'MISSING_RECORD',
+      `${model} record(s) ${ids.join(', ')} do not exist or are not accessible.`,
+      'The id may come from stale data or another company; search for the record instead of browsing a remembered id.',
+    );
+  }
+}
+
+/** A search domain that can't be compiled (RFC 0005 §7.1). */
+export class InvalidDomainError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('INVALID_DOMAIN', problem, hint);
+  }
+}
+
+/** `env.model()` on a Shutro instance created without a registry. */
+export class NoRegistryError extends ShutroError {
+  constructor() {
+    super(
+      'NO_REGISTRY',
+      'This Shutro instance has no registry, so there are no models.',
+      'Pass registry: buildRegistry({ modules }) to createShutro().',
+    );
   }
 }
 

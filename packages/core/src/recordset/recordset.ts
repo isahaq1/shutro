@@ -1,0 +1,675 @@
+/**
+ * Recordset runtime (RFC 0004): identity map per transaction, prefetch groups, batched loads, typed access.
+ */
+
+import { compile, sql } from '@shutro/sql';
+import { Decimal as DecimalJs } from 'decimal.js';
+import { type Env, internalsOf, type ScopeInternals } from '../env/env.js';
+import { FieldNotLoadedError, MissingRecordError, SingletonError } from '../errors.js';
+import type { Field } from '../model/field.js';
+import type { AnyModel } from '../model/model.js';
+import { type Currency, defineCurrency } from '../money/currency.js';
+import { Money } from '../money/money.js';
+import { defineUom, Quantity, type Uom } from '../money/quantity.js';
+import type { RoundingMethod } from '../money/rounding.js';
+import type { RegisteredModel, Registry } from '../registry/registry.js';
+import { targetOf } from '../registry/registry.js';
+import { compileDomain, compileOrder, scopingConditions } from './domain.js';
+import { junctionTable } from './relations.js';
+
+const CHUNK = 1000;
+
+// ------------------------------------------------------------------------------------------------ cache
+
+/** Field values of one record. Scalars as values, many2one as id | null, x2many as id arrays. */
+type Values = Map<string, unknown>;
+
+/** The per-transaction identity map and value-object caches (RFC 0004 §7.4). */
+export interface RecordCache {
+  readonly records: Map<string, Map<number, Values>>;
+  readonly currencies: Map<number, Currency>;
+  readonly uoms: Map<number, Uom>;
+}
+
+/** @internal */
+export function createRecordCache(): RecordCache {
+  return { records: new Map(), currencies: new Map(), uoms: new Map() };
+}
+
+function valuesOf(
+  cache: RecordCache,
+  model: string,
+  id: number,
+  create = false,
+): Values | undefined {
+  let byId = cache.records.get(model);
+  if (byId === undefined) {
+    if (!create) return undefined;
+    byId = new Map();
+    cache.records.set(model, byId);
+  }
+  let values = byId.get(id);
+  if (values === undefined && create) {
+    values = new Map();
+    byId.set(id, values);
+  }
+  return values;
+}
+
+// ---------------------------------------------------------------------------------------------- load specs
+
+interface NormalizedSpec {
+  /** Scalar and many2one keys to fetch (plus `id`). */
+  readonly fields: ReadonlySet<string>;
+  /** Nested relations. */
+  readonly relations: ReadonlyMap<string, NormalizedSpec>;
+}
+
+function isX2Many(field: Field): boolean {
+  return field.kind === 'one2many' || field.kind === 'many2many';
+}
+
+/** Stored, non-binary, not x2many (RFC 0004 §6.1). */
+export function defaultKeys(model: AnyModel): string[] {
+  return Object.entries(model.fields)
+    .filter(([, f]) => f.store && f.kind !== 'binary' && !isX2Many(f))
+    .map(([key]) => key);
+}
+
+/** Adds the sibling currency / uom fields that monetary / quantity values need. */
+function withSiblings(model: AnyModel, keys: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const key of keys) {
+    out.add(key);
+    const field = model.fields[key] as
+      | (Field & { currencyField?: string; uomField?: string })
+      | undefined;
+    if (field?.currencyField !== undefined) out.add(field.currencyField);
+    if (field?.uomField !== undefined) out.add(field.uomField);
+  }
+  return out;
+}
+
+function normalizeSpec(model: AnyModel, registry: Registry, spec: unknown): NormalizedSpec {
+  if (spec === undefined || spec === true)
+    return { fields: withSiblings(model, defaultKeys(model)), relations: new Map() };
+  if (Array.isArray(spec)) {
+    for (const key of spec) {
+      const field = model.fields[String(key)];
+      if (field === undefined || isX2Many(field)) {
+        throw new FieldNotLoadedError(
+          model.name,
+          String(key),
+          `'${String(key)}' is not a loadable field of ${model.name}; list scalar or many2one fields, or use { ${String(key)}: true } for relations.`,
+        );
+      }
+    }
+    return { fields: withSiblings(model, ['id', ...spec.map(String)]), relations: new Map() };
+  }
+  const relations = new Map<string, NormalizedSpec>();
+  for (const [key, sub] of Object.entries(spec as Record<string, unknown>)) {
+    if (sub === undefined || sub === false) continue;
+    const field = model.fields[key];
+    const target = field === undefined ? undefined : targetOf(field);
+    if (field === undefined || target === undefined) {
+      throw new FieldNotLoadedError(
+        model.name,
+        key,
+        `'${key}' is not a relation of ${model.name}; nested load specs only take many2one, one2many and many2many fields.`,
+      );
+    }
+    relations.set(key, normalizeSpec(registry.get(target).model, registry, sub));
+  }
+  return { fields: withSiblings(model, defaultKeys(model)), relations };
+}
+
+// ------------------------------------------------------------------------------------------------ loading
+
+interface Loader {
+  readonly env: Env;
+  readonly internals: ScopeInternals;
+  readonly registry: Registry;
+}
+
+function hydrate(
+  model: AnyModel,
+  row: Record<string, unknown>,
+  keys: Iterable<string>,
+  cache: RecordCache,
+): number {
+  const id = Number(row['id']);
+  const values = valuesOf(cache, model.name, id, true) as Values;
+  for (const key of keys) {
+    const column = model.columns[key];
+    if (column === undefined || key === 'id') continue;
+    values.set(key, row[column] ?? null);
+  }
+  return id;
+}
+
+/** Fetches the given fields for the records that don't have all of them cached. One query per 1,000 ids. */
+async function fetchMissing(
+  loader: Loader,
+  model: AnyModel,
+  ids: readonly number[],
+  fields: ReadonlySet<string>,
+): Promise<void> {
+  const { cache } = loader.internals;
+  const wanted = [...fields].filter((k) => k !== 'id' && model.columns[k] !== undefined);
+  const missing = ids.filter((id) => {
+    const values = valuesOf(cache, model.name, id);
+    return values === undefined || wanted.some((k) => !values.has(k));
+  });
+  if (missing.length === 0 || wanted.length === 0) {
+    if (missing.length > 0) await assertExist(loader, model, missing);
+    return;
+  }
+  const columns = sql.join([sql.id('id'), ...wanted.map((k) => sql.id(model.columns[k] ?? ''))]);
+  const seen = new Set<number>();
+  for (let i = 0; i < missing.length; i += CHUNK) {
+    const chunk = missing.slice(i, i + CHUNK);
+    const rows = await loader.internals.query<Record<string, unknown>>(
+      compile(
+        sql`SELECT ${columns} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${chunk})`,
+      ),
+    );
+    for (const row of rows) seen.add(hydrate(model, row, wanted, cache));
+  }
+  const absent = missing.filter((id) => !seen.has(id));
+  if (absent.length > 0) throw new MissingRecordError(model.name, absent);
+  await ensureValueObjects(loader, model, ids, fields);
+}
+
+async function assertExist(loader: Loader, model: AnyModel, ids: readonly number[]): Promise<void> {
+  const rows = await loader.internals.query<{ id: number }>(
+    compile(
+      sql`SELECT ${sql.id('id')} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${[...ids]})`,
+    ),
+  );
+  const found = new Set(rows.map((r) => Number(r.id)));
+  for (const id of ids) valuesOf(loader.internals.cache, model.name, id, true);
+  const absent = ids.filter((id) => !found.has(id));
+  if (absent.length > 0) throw new MissingRecordError(model.name, absent);
+}
+
+/** Loads the currencies / units referenced by monetary / quantity fields, through the record cache. */
+async function ensureValueObjects(
+  loader: Loader,
+  model: AnyModel,
+  ids: readonly number[],
+  fields: ReadonlySet<string>,
+): Promise<void> {
+  const { cache } = loader.internals;
+  const needed = { currency: new Set<number>(), uom: new Set<number>() };
+  for (const key of fields) {
+    const field = model.fields[key] as
+      | (Field & { currencyField?: string; uomField?: string })
+      | undefined;
+    if (field === undefined) continue;
+    const ref =
+      field.currencyField !== undefined
+        ? ({ kind: 'currency', key: field.currencyField } as const)
+        : field.uomField !== undefined
+          ? ({ kind: 'uom', key: field.uomField } as const)
+          : undefined;
+    if (ref === undefined) continue;
+    for (const id of ids) {
+      const value = valuesOf(cache, model.name, id)?.get(ref.key);
+      if (
+        typeof value === 'number' &&
+        !(ref.kind === 'currency' ? cache.currencies : cache.uoms).has(value)
+      )
+        needed[ref.kind].add(value);
+    }
+  }
+  if (needed.currency.size > 0) {
+    const currency = loader.registry.get('res.currency').model;
+    const ids = [...needed.currency];
+    await fetchMissing(loader, currency, ids, new Set(defaultKeys(currency)));
+    for (const id of ids) {
+      const v = valuesOf(cache, currency.name, id);
+      const method =
+        typeof v?.get('roundingMethod') === 'string'
+          ? (String(v.get('roundingMethod')).replaceAll('_', '-') as RoundingMethod)
+          : undefined;
+      const places = v?.get('decimalPlaces');
+      cache.currencies.set(
+        id,
+        defineCurrency({
+          code: String(v?.get('name')),
+          rounding: v?.get('rounding') as DecimalJs,
+          ...(method === undefined ? {} : { roundingMethod: method }),
+          ...(typeof places === 'number' ? { decimalPlaces: places } : {}),
+          id,
+        }),
+      );
+    }
+  }
+  if (needed.uom.size > 0) {
+    const uom = loader.registry.get('uom.uom').model;
+    const ids = [...needed.uom];
+    await fetchMissing(loader, uom, ids, new Set(defaultKeys(uom)));
+    for (const id of ids) {
+      const v = valuesOf(cache, uom.name, id);
+      cache.uoms.set(
+        id,
+        defineUom({
+          name: String(v?.get('name')),
+          category: String(v?.get('category')),
+          ratio: v?.get('ratio') as DecimalJs,
+          rounding: v?.get('rounding') as DecimalJs,
+          id,
+        }),
+      );
+    }
+  }
+}
+
+/** Loads the relation `key` (x2many) of the parents whose child list isn't cached, with the sub-spec's fields, in one query. */
+async function fetchX2Many(
+  loader: Loader,
+  model: AnyModel,
+  key: string,
+  parents: readonly number[],
+  sub: NormalizedSpec,
+): Promise<number[]> {
+  const { cache } = loader.internals;
+  const field = model.fields[key] as Field & { target: string; inverseField?: string };
+  const target = loader.registry.get(field.target).model;
+  const missing = parents.filter((id) => !valuesOf(cache, model.name, id)?.has(key));
+  const wanted = [...sub.fields].filter((k) => k !== 'id' && target.columns[k] !== undefined);
+  const children = new Map<number, number[]>();
+  for (const id of missing) children.set(id, []);
+  if (missing.length > 0) {
+    const t = sql.id('t');
+    const columns = sql.join([
+      sql`${t}.${sql.id('id')}`,
+      ...wanted.map((k) => sql`${t}.${sql.id(target.columns[k] ?? '')}`),
+    ]);
+    const order = compileOrder(target, undefined);
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const chunk = missing.slice(i, i + CHUNK);
+      let rows: readonly Record<string, unknown>[];
+      if (field.kind === 'one2many') {
+        const inverse = sql.id(target.columns[field.inverseField ?? ''] ?? '');
+        rows = await loader.internals.query(
+          compile(
+            sql`SELECT ${t}.${inverse} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(target.table)} AS ${t} WHERE ${t}.${inverse} = ANY(${chunk}) ORDER BY ${order}`,
+          ),
+        );
+      } else {
+        const j = junctionTable(model, field, target);
+        rows = await loader.internals.query(
+          compile(
+            sql`SELECT ${sql.id('rel', j.sourceColumn)} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(j.table)} AS ${sql.id('rel')} INNER JOIN ${sql.id(target.table)} AS ${t} ON ${t}.${sql.id('id')} = ${sql.id('rel', j.targetColumn)} WHERE ${sql.id('rel', j.sourceColumn)} = ANY(${chunk}) ORDER BY ${order}`,
+          ),
+        );
+      }
+      for (const row of rows) {
+        const childId = hydrate(target, row, wanted, cache);
+        children.get(Number(row['parent_id']))?.push(childId);
+      }
+    }
+    for (const [parent, ids] of children)
+      (valuesOf(cache, model.name, parent, true) as Values).set(key, ids);
+  }
+  const all: number[] = [];
+  for (const id of parents)
+    for (const child of (valuesOf(cache, model.name, id)?.get(key) as number[] | undefined) ?? [])
+      all.push(child);
+  const unique = [...new Set(all)];
+  await ensureValueObjects(loader, target, unique, sub.fields);
+  return unique;
+}
+
+/** Loads `spec` for `ids` of `model`, recursively (RFC 0004 §7.1). */
+async function loadInto(
+  loader: Loader,
+  model: AnyModel,
+  ids: readonly number[],
+  spec: NormalizedSpec,
+): Promise<void> {
+  if (ids.length === 0) return;
+  await fetchMissing(loader, model, ids, spec.fields);
+  for (const [key, sub] of spec.relations) {
+    const field = model.fields[key] as Field & { target: string };
+    if (field.kind === 'many2one') {
+      const targetIds = new Set<number>();
+      for (const id of ids) {
+        const value = valuesOf(loader.internals.cache, model.name, id)?.get(key);
+        if (typeof value === 'number') targetIds.add(value);
+      }
+      await loadInto(loader, loader.registry.get(field.target).model, [...targetIds], sub);
+    } else {
+      const children = await fetchX2Many(loader, model, key, ids, sub);
+      const target = loader.registry.get(field.target).model;
+      for (const [k, nested] of sub.relations)
+        await loadInto(loader, target, children, {
+          fields: new Set(),
+          relations: new Map([[k, nested]]),
+        });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------- recordsets
+
+/** Ids shared by the records loaded together (RFC 0004 §7.3). */
+interface Group {
+  readonly ids: readonly number[];
+}
+
+interface Pending {
+  readonly parentModel: AnyModel;
+  readonly key: string;
+  /** The parent record(s) this set belongs to. */
+  readonly own: readonly number[];
+  /** Every parent of the prefetch group: loading fetches the relation for all of them. */
+  readonly parents: readonly number[];
+}
+
+const prototypes = new WeakMap<AnyModel, typeof RecordSetImpl>();
+
+/** @internal Runtime recordset. Typed through `RecordSet` / `Rec` / `PendingSet` (types.ts). */
+export class RecordSetImpl {
+  readonly env: Env;
+  readonly registered: RegisteredModel;
+  readonly modelName: string;
+  readonly #ids: readonly number[] | undefined;
+  readonly #group: Group | undefined;
+  readonly #pending: Pending | undefined;
+
+  constructor(
+    env: Env,
+    registered: RegisteredModel,
+    ids: readonly number[] | undefined,
+    group: Group | undefined,
+    pending: Pending | undefined,
+  ) {
+    this.env = env;
+    this.registered = registered;
+    this.modelName = registered.model.name;
+    this.#ids = ids;
+    this.#group = group;
+    this.#pending = pending;
+  }
+
+  get #loader(): Loader {
+    const internals = internalsOf(this.env);
+    return { env: this.env, internals, registry: internals.registry };
+  }
+
+  get model(): AnyModel {
+    return this.registered.model;
+  }
+
+  get ids(): readonly number[] {
+    if (this.#ids === undefined) {
+      throw new FieldNotLoadedError(
+        this.modelName,
+        this.#pending?.key ?? 'ids',
+        'This x2many relation was not loaded yet: await set.load() (or load it with the parent: load({ lines: true })).',
+      );
+    }
+    return this.#ids;
+  }
+
+  get length(): number {
+    return this.ids.length;
+  }
+
+  isEmpty(): boolean {
+    return this.ids.length === 0;
+  }
+
+  #record(id: number): RecordSetImpl {
+    const Ctor = recordClass(this.model);
+    return new Ctor(this.env, this.registered, [id], this.#group ?? { ids: this.ids }, undefined);
+  }
+
+  *[Symbol.iterator](): Iterator<RecordSetImpl> {
+    for (const id of this.ids) yield this.#record(id);
+  }
+
+  first(): RecordSetImpl {
+    const id = this.ids[0];
+    if (id === undefined) throw new SingletonError(this.modelName, 0, 'first');
+    return this.#record(id);
+  }
+
+  ensureOne(): RecordSetImpl {
+    if (this.ids.length !== 1)
+      throw new SingletonError(this.modelName, this.ids.length, 'ensureOne');
+    return this.first();
+  }
+
+  /** The record's id (singletons only). */
+  get id(): number {
+    return this.ensureOne().ids[0] as number;
+  }
+
+  map<T>(fn: (record: never, index: number) => T): T[] {
+    return [...this].map((r, i) => fn(r as never, i));
+  }
+
+  filter(fn: (record: never, index: number) => boolean): RecordSetImpl {
+    const kept = [...this].filter((r, i) => fn(r as never, i)).map((r) => r.ids[0] as number);
+    return new RecordSetImpl(this.env, this.registered, kept, this.#group, undefined);
+  }
+
+  mapped(key: string): unknown[] {
+    return [...this].map((r) => (r as unknown as Record<string, unknown>)[key]);
+  }
+
+  async load(spec?: unknown): Promise<RecordSetImpl> {
+    const loader = this.#loader;
+    const normalized = normalizeSpec(this.model, loader.registry, spec);
+    if (this.#pending !== undefined && this.#ids === undefined) {
+      const { parentModel, key, parents, own } = this.#pending;
+      await fetchX2Many(loader, parentModel, key, parents, normalized);
+      const mine = own.flatMap(
+        (p) =>
+          (valuesOf(loader.internals.cache, parentModel.name, p)?.get(key) as
+            | number[]
+            | undefined) ?? [],
+      );
+      const all = parents.flatMap(
+        (p) =>
+          (valuesOf(loader.internals.cache, parentModel.name, p)?.get(key) as
+            | number[]
+            | undefined) ?? [],
+      );
+      const target = this.model;
+      for (const [k, nested] of normalized.relations)
+        await loadInto(loader, target, [...new Set(all)], {
+          fields: new Set(),
+          relations: new Map([[k, nested]]),
+        });
+      return new RecordSetImpl(
+        this.env,
+        this.registered,
+        mine,
+        { ids: [...new Set(all)] },
+        undefined,
+      );
+    }
+    const group = this.#group?.ids ?? this.ids;
+    await loadInto(loader, this.model, group, normalized);
+    return new RecordSetImpl(this.env, this.registered, this.ids, this.#group, undefined);
+  }
+
+  /** Ids of a pending x2many set, loading them if needed. */
+  async resolveIds(): Promise<readonly number[]> {
+    if (this.#ids !== undefined) return this.#ids;
+    return (await this.load([])).ids;
+  }
+
+  read(keys: readonly string[]): Record<string, unknown>[] {
+    return [...this].map((r) => {
+      const row: Record<string, unknown> = { id: r.ids[0] };
+      for (const key of keys) row[key] = plain(r.fieldValue(key), this.model.fields[key]);
+      return row;
+    });
+  }
+
+  toJSON(): readonly number[] {
+    return this.ids;
+  }
+
+  /** @internal Reads field `key` of a singleton from the cache. */
+  fieldValue(key: string): unknown {
+    const id = this.ids[0];
+    const field = this.model.fields[key];
+    if (id === undefined || field === undefined)
+      throw new FieldNotLoadedError(
+        this.modelName,
+        key,
+        `'${key}' is not a field of ${this.modelName}.`,
+      );
+    const { cache } = internalsOf(this.env);
+    const values = valuesOf(cache, this.modelName, id);
+    if (field.kind === 'one2many' || field.kind === 'many2many') {
+      const target = this.#loader.registry.get(targetOf(field) ?? '');
+      const children = values?.get(key) as number[] | undefined;
+      const group = this.#group?.ids ?? [id];
+      if (children === undefined)
+        return new RecordSetImpl(this.env, target, undefined, undefined, {
+          parentModel: this.model,
+          key,
+          own: [id],
+          parents: group,
+        });
+      return new RecordSetImpl(
+        this.env,
+        target,
+        children,
+        {
+          ids: group.flatMap(
+            (p) => (valuesOf(cache, this.modelName, p)?.get(key) as number[] | undefined) ?? [],
+          ),
+        },
+        undefined,
+      );
+    }
+    if (values === undefined || !values.has(key)) {
+      throw new FieldNotLoadedError(
+        this.modelName,
+        key,
+        `Load it first: await records.load(['${key}'])${field.kind === 'many2one' ? ` or load({ ${key}: true }) for the related record` : ''}.`,
+      );
+    }
+    const raw = values.get(key);
+    if (field.kind === 'many2one') {
+      if (raw === null) return null;
+      const target = this.#loader.registry.get(targetOf(field) ?? '');
+      const group = this.#group?.ids ?? [id];
+      const targetIds = [
+        ...new Set(
+          group
+            .map((p) => valuesOf(cache, this.modelName, p)?.get(key))
+            .filter((v): v is number => typeof v === 'number'),
+        ),
+      ];
+      const Ctor = recordClass(target.model);
+      return new Ctor(this.env, target, [raw as number], { ids: targetIds }, undefined);
+    }
+    if (field.kind === 'monetary') {
+      if (raw === null) return null;
+      const currencyId = values.get((field as unknown as { currencyField: string }).currencyField);
+      const currency =
+        typeof currencyId === 'number' ? cache.currencies.get(currencyId) : undefined;
+      if (currency === undefined)
+        throw new FieldNotLoadedError(
+          this.modelName,
+          key,
+          'The currency of this monetary field is not loaded; load the field through the ORM (search/load), which loads currencies with it.',
+        );
+      return Money.of(raw as DecimalJs, currency);
+    }
+    if (field.kind === 'quantity') {
+      if (raw === null) return null;
+      const uomId = values.get((field as unknown as { uomField: string }).uomField);
+      const uom = typeof uomId === 'number' ? cache.uoms.get(uomId) : undefined;
+      if (uom === undefined) return null;
+      return Quantity.of(raw as DecimalJs, uom);
+    }
+    return raw;
+  }
+}
+
+function plain(value: unknown, field: Field | undefined): unknown {
+  if (value instanceof RecordSetImpl)
+    return field?.kind === 'many2one' ? value.ids[0] : [...value.ids];
+  if (value instanceof Money || value instanceof Quantity) return value.toJSON();
+  if (value instanceof Date) return value.toISOString();
+  if (DecimalJs.isDecimal(value)) return (value as DecimalJs).toFixed();
+  return value;
+}
+
+/** One subclass per model with an accessor per field, created on first use. */
+function recordClass(model: AnyModel): typeof RecordSetImpl {
+  let Ctor = prototypes.get(model);
+  if (Ctor === undefined) {
+    Ctor = class extends RecordSetImpl {};
+    for (const key of Object.keys(model.fields)) {
+      if (key === 'id') continue;
+      Object.defineProperty(Ctor.prototype, key, {
+        get(this: RecordSetImpl) {
+          return this.fieldValue(key);
+        },
+        enumerable: true,
+      });
+    }
+    prototypes.set(model, Ctor);
+  }
+  return Ctor;
+}
+
+/** @internal `env.model(name)`. */
+export function modelRef(
+  env: Env,
+  name: string,
+): {
+  modelName: string;
+  search(query?: unknown): Promise<RecordSetImpl>;
+  browse(ids: readonly number[]): RecordSetImpl;
+} {
+  const internals = internalsOf(env);
+  const registered = internals.registry.get(name);
+  const model = registered.model;
+  return {
+    modelName: name,
+    async search(
+      query: {
+        where?: Record<string, unknown>;
+        order?: readonly string[];
+        limit?: number;
+        offset?: number;
+      } = {},
+    ): Promise<RecordSetImpl> {
+      const fields = withSiblings(model, defaultKeys(model));
+      const wanted = [...fields].filter((k) => k !== 'id' && model.columns[k] !== undefined);
+      const columns = sql.join([
+        sql.id('id'),
+        ...wanted.map((k) => sql.id(model.columns[k] ?? '')),
+      ]);
+      const conditions = [...compileDomain(model, query.where), ...scopingConditions(model, env)];
+      const where =
+        conditions.length === 0 ? sql.empty : sql` WHERE ${sql.join(conditions, sql` AND `)}`;
+      const limit = query.limit === undefined ? sql.empty : sql` LIMIT ${query.limit}`;
+      const offset = query.offset === undefined ? sql.empty : sql` OFFSET ${query.offset}`;
+      const rows = await internals.query<Record<string, unknown>>(
+        compile(
+          sql`SELECT ${columns} FROM ${sql.id(model.table)}${where} ORDER BY ${compileOrder(model, query.order)}${limit}${offset}`,
+        ),
+      );
+      const ids = rows.map((row) => hydrate(model, row, wanted, internals.cache));
+      const loader: Loader = { env, internals, registry: internals.registry };
+      await ensureValueObjects(loader, model, ids, fields);
+      return new RecordSetImpl(env, registered, ids, { ids }, undefined);
+    },
+    browse(ids: readonly number[]): RecordSetImpl {
+      return new RecordSetImpl(env, registered, [...ids], { ids: [...ids] }, undefined);
+    },
+  };
+}

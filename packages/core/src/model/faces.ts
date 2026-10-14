@@ -56,3 +56,8 @@ export type CreateOf<Fs> = Simplify<
 export type WriteOf<Fs> = {
   readonly [K in keyof Fs as Writable<Fs[K]> extends true ? K : never]?: WriteValue<Fs[K]>;
 };
+
+/** The value a record exposes for field `F`: `T` when required, else `T | null`. */
+export type ReadValue<F> = Required<F> extends true ? Read<F> : Read<F> | null;
+/** The write type of field `F` (what `create` / `write` / domains accept). */
+export type WriteType<F> = Write<F>;

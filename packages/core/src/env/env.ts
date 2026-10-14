@@ -1,13 +1,23 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { type Driver, type DriverConnection, isRetryable, type Row } from '@shutro/driver-pg';
+import {
+  type Driver,
+  type DriverConnection,
+  type DriverQuery,
+  isRetryable,
+  type Row,
+} from '@shutro/driver-pg';
 import { compile, sql as sqlTag } from '@shutro/sql';
 import {
   CompanyNotAllowedError,
   ConcurrentUpdateError,
   FlagNotAllowedError,
   NoEnvironmentError,
+  NoRegistryError,
   TransactionScopeError,
 } from '../errors.js';
+import { createRecordCache, modelRef, type RecordCache } from '../recordset/recordset.js';
+import type { ModelName, ModelRef } from '../recordset/types.js';
+import type { Registry } from '../registry/registry.js';
 import {
   assertLang,
   assertReason,
@@ -17,13 +27,13 @@ import {
 } from './identity.js';
 import { assertTimeZone, calendarDateIn } from './time.js';
 
-/** Typed context flags (RFC 0003 §7.4). Module-contributed flags arrive with the registry. */
+/** Typed context flags (RFC 0003 §7.4). Module-contributed flags arrive with the registry's second half. */
 export interface Flags {
   /** Searches hide archived records. Default `true`. */
   readonly activeTest: boolean;
   /** Audit / tracking messages are written. Default `true` (imports may turn it off). */
   readonly tracking: boolean;
-  /** Multi-company consistency checks. Default `true`; only a superuser environment may disable it. */
+  /** Multi-company consistency checks and scoping. Default `true`; only a superuser environment may disable it. */
   readonly checkCompany: boolean;
 }
 
@@ -44,6 +54,11 @@ export interface RunOptions extends Identity {
   readonly retry?: false;
 }
 
+/** Query statistics of the current attempt. */
+export interface ScopeStats {
+  readonly queries: number;
+}
+
 /** A transaction or savepoint. */
 interface Scope {
   readonly root: RootScope;
@@ -60,11 +75,31 @@ interface RootScope {
   top: Scope;
   readonly attempt: number;
   readonly now: Date;
+  queries: number;
+  /** Identity map and value-object caches (RFC 0004 §7.4), shared by the savepoints of this attempt. */
+  readonly cache: RecordCache;
 }
 
 interface Runtime {
   readonly als: AsyncLocalStorage<Scope>;
   readonly onHookError: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
+  readonly registry: Registry | undefined;
+}
+
+/** @internal What the recordset runtime needs from an environment. */
+export interface ScopeInternals {
+  readonly registry: Registry;
+  readonly cache: RecordCache;
+  query<R extends Row>(query: DriverQuery): Promise<readonly R[]>;
+}
+
+const internals = new WeakMap<object, () => ScopeInternals>();
+
+/** @internal */
+export function internalsOf(env: Env): ScopeInternals {
+  const get = internals.get(env);
+  if (get === undefined) throw new NoEnvironmentError();
+  return get();
 }
 
 async function runHooks(
@@ -83,9 +118,10 @@ async function runHooks(
 
 /**
  * The environment (RFC 0003): who is acting, for which company, how, and in which transaction. Immutable; the
- * `with*` methods return derived environments that share the transaction scope.
+ * `with*` methods return derived environments that share the transaction scope. `S` is the schema view of the
+ * registry (model name → model), which types `model()`.
  */
-export class Env {
+export class Env<S = unknown> {
   /** Id of the acting user. */
   readonly uid: number;
   /** Current company id. */
@@ -128,7 +164,21 @@ export class Env {
     this.attempt = scope.root.attempt;
     this.#scope = scope;
     this.#runtime = runtime;
+    internals.set(this, () => {
+      this.#assertUsable();
+      const registry = runtime.registry;
+      if (registry === undefined) throw new NoRegistryError();
+      return { registry, cache: scope.root.cache, query: (q) => this.#query(q) };
+    });
     Object.freeze(this);
+  }
+
+  /** An empty recordset of `name`: `search()` / `browse()` start here (RFC 0004). */
+  model<M extends ModelName<S>>(name: M): ModelRef<S, M> {
+    if (this.#runtime.registry === undefined) throw new NoRegistryError();
+    this.#assertUsable();
+    // The runtime is untyped over S; widening here is safe because it never reads S.
+    return modelRef(this as unknown as Env, name) as unknown as ModelRef<S, M>;
   }
 
   /** The transaction timestamp (PostgreSQL `now()`), stable within an attempt. Returns a fresh `Date` each call. */
@@ -146,6 +196,11 @@ export class Env {
     return calendarDateIn(this.#scope.root.now, tz);
   }
 
+  /** Statistics of the current attempt (query counts for N+1 assertions, RFC 0004 §7.9). */
+  stats(): ScopeStats {
+    return { queries: this.#scope.root.queries };
+  }
+
   /**
    * Raw SQL in this transaction (RFC 0005 §7.8): values become parameters, identifiers go through `sql.id()`.
    * Rejects with {@link TransactionScopeError} when the scope has ended or another scope is active.
@@ -156,12 +211,12 @@ export class Env {
   ): Promise<readonly R[]> {
     return (async () => {
       this.#assertUsable();
-      return this.#scope.conn.query<R>(compile(sqlTag(strings, ...values)));
+      return this.#query<R>(compile(sqlTag(strings, ...values)));
     })();
   }
 
   /** Runs `fn` in a savepoint: its work (and its hooks) are discarded if it throws, kept otherwise. */
-  async transaction<T>(fn: (env: Env) => Promise<T>): Promise<T> {
+  async transaction<T>(fn: (env: Env<S>) => Promise<T>): Promise<T> {
     this.#assertUsable();
     const parent = this.#scope;
     const root = parent.root;
@@ -173,14 +228,14 @@ export class Env {
           parent,
           conn,
           status: 'open',
-          env: this,
+          env: this as unknown as Env,
           afterCommit: [],
           onRollback: [],
         };
-        scope.env = this.#derive({}, scope);
+        scope.env = this.#derive({}, scope) as unknown as Env;
         child = scope;
         root.top = scope;
-        return this.#runtime.als.run(scope, () => fn(scope.env));
+        return this.#runtime.als.run(scope, () => fn(scope.env as Env<S>));
       });
       if (child !== undefined) {
         child.status = 'committed';
@@ -212,7 +267,7 @@ export class Env {
   }
 
   /** The same scope with another current company. Must be allowed unless `su`. @throws {CompanyNotAllowedError} */
-  withCompany(company: number): Env {
+  withCompany(company: number): Env<S> {
     if (!this.su && !this.companyIds.includes(company))
       throw new CompanyNotAllowedError(company, this.companyIds);
     const companyIds = this.companyIds.includes(company)
@@ -222,18 +277,18 @@ export class Env {
   }
 
   /** The same scope with another language. */
-  withLang(lang: string): Env {
+  withLang(lang: string): Env<S> {
     return this.#derive({ lang: assertLang(lang) });
   }
 
   /** The same scope with another time zone. */
-  withTz(tz: string): Env {
+  withTz(tz: string): Env<S> {
     assertTimeZone(tz);
     return this.#derive({ tz });
   }
 
   /** The same scope with some flags changed. `checkCompany: false` needs `su`. @throws {FlagNotAllowedError} */
-  withFlags(flags: Partial<Flags>): Env {
+  withFlags(flags: Partial<Flags>): Env<S> {
     if (flags.checkCompany === false && !this.su) throw new FlagNotAllowedError('checkCompany');
     return this.#derive({ flags: Object.freeze({ ...this.flags, ...flags }) });
   }
@@ -244,18 +299,23 @@ export class Env {
    */
   async asSuperuser<T>(
     options: { readonly reason: string },
-    fn: (su: Env) => Promise<T>,
+    fn: (su: Env<S>) => Promise<T>,
   ): Promise<T> {
     const reason = assertReason(options.reason);
     this.#assertUsable();
     return fn(this.#derive({ su: true, reason }));
   }
 
+  async #query<R extends Row>(query: DriverQuery): Promise<readonly R[]> {
+    this.#scope.root.queries++;
+    return this.#scope.conn.query<R>(query);
+  }
+
   #derive(
     changes: Partial<ResolvedIdentity & { su: boolean; flags: Flags; readOnly: boolean }>,
     scope: Scope = this.#scope,
-  ): Env {
-    return new Env(
+  ): Env<S> {
+    return new Env<S>(
       {
         uid: this.uid,
         companyId: this.companyId,
@@ -298,8 +358,10 @@ export class Env {
 }
 
 /** Options of {@link createShutro}. */
-export interface ShutroOptions {
+export interface ShutroOptions<S> {
   readonly driver: Driver;
+  /** The registry built from the application's modules. Without it, `env.model()` is unavailable. */
+  readonly registry?: Registry<S>;
   /** Retry policy for serialization failures and deadlocks. Default: 5 attempts with jittered exponential backoff. */
   readonly retry?: {
     readonly attempts?: number;
@@ -313,8 +375,8 @@ export interface ShutroOptions {
   readonly onHookError?: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
 }
 
-/** A Shutro instance: one driver, one AsyncLocalStorage. No global state (`CLAUDE.md`). */
-export interface Shutro {
+/** A Shutro instance: one driver, one registry, one AsyncLocalStorage. No global state (`CLAUDE.md`). */
+export interface Shutro<S = unknown> {
   /**
    * Runs `fn` in one transaction with the given identity (RFC 0003 §7.1): `REPEATABLE READ`, identity pushed as
    * `SET LOCAL` settings (`shutro.user_id`, `shutro.company_ids`), `TimeZone = UTC`. Commits when `fn` resolves,
@@ -324,9 +386,9 @@ export interface Shutro {
    * @throws {InvalidIdentityError} before any transaction starts.
    * @throws {ConcurrentUpdateError} when every attempt conflicted.
    */
-  run<T>(options: RunOptions, fn: (env: Env) => Promise<T>): Promise<T>;
+  run<T>(options: RunOptions, fn: (env: Env<S>) => Promise<T>): Promise<T>;
   /** The environment of the innermost active scope. @throws {NoEnvironmentError} outside `run()`. */
-  currentEnv(): Env;
+  currentEnv(): Env<S>;
 }
 
 const defaultBackoff = (attempt: number): number =>
@@ -339,18 +401,19 @@ const defaultHookError = (error: unknown, phase: string): void => {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Creates a {@link Shutro} instance on a driver. */
-export function createShutro(options: ShutroOptions): Shutro {
+/** Creates a {@link Shutro} instance on a driver (and a registry). */
+export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> {
   const attempts = options.retry?.attempts ?? 5;
   const backoff = options.retry?.backoffMs ?? defaultBackoff;
   const runtime: Runtime = {
     als: new AsyncLocalStorage<Scope>(),
     onHookError: options.onHookError ?? defaultHookError,
+    registry: options.registry as Registry | undefined,
   };
   const NOW = compile(sqlTag`SELECT now() AS now`);
 
   return {
-    async run<T>(runOptions: RunOptions, fn: (env: Env) => Promise<T>): Promise<T> {
+    async run<T>(runOptions: RunOptions, fn: (env: Env<S>) => Promise<T>): Promise<T> {
       const identity = resolveIdentity(runOptions);
       const maxAttempts = runOptions.retry === false ? 1 : attempts;
       for (let attempt = 1; ; attempt++) {
@@ -372,6 +435,8 @@ export function createShutro(options: ShutroOptions): Shutro {
                 top: undefined as unknown as Scope,
                 attempt,
                 now: row?.now ?? new Date(),
+                queries: 0,
+                cache: createRecordCache(),
               };
               const s: Scope = {
                 root,
@@ -383,7 +448,7 @@ export function createShutro(options: ShutroOptions): Shutro {
                 onRollback: [],
               };
               root.top = s;
-              s.env = new Env(
+              s.env = new Env<unknown>(
                 {
                   ...identity,
                   su: false,
@@ -394,7 +459,7 @@ export function createShutro(options: ShutroOptions): Shutro {
                 runtime,
               );
               scope = s;
-              return runtime.als.run(s, () => fn(s.env));
+              return runtime.als.run(s, () => fn(s.env as Env<S>));
             },
           );
           if (scope !== undefined) {
@@ -417,10 +482,10 @@ export function createShutro(options: ShutroOptions): Shutro {
       }
     },
 
-    currentEnv(): Env {
+    currentEnv(): Env<S> {
       const scope = runtime.als.getStore();
       if (scope === undefined) throw new NoEnvironmentError();
-      return scope.env;
+      return scope.env as Env<S>;
     },
   };
 }

@@ -224,6 +224,10 @@ export const RESERVED_KEYS: readonly string[] = Object.freeze([
   'equals',
   'isEmpty',
   'names',
+  'modelName',
+  'registered',
+  'resolveIds',
+  'fieldValue',
 ]);
 /** @see RESERVED_KEYS */
 export type ReservedKey =
@@ -265,7 +269,11 @@ export type ReservedKey =
   | 'describe'
   | 'equals'
   | 'isEmpty'
-  | 'names';
+  | 'names'
+  | 'modelName'
+  | 'registered'
+  | 'resolveIds'
+  | 'fieldValue';
 
 type KeysTargeting<Fs, T extends string> = {
   [K in keyof Fs]: Fs[K] extends { readonly kind: 'many2one'; readonly target: T } ? K : never;
