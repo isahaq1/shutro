@@ -22,21 +22,28 @@ export {
   ConcurrentUpdateError,
   CurrencyMismatchError,
   DivisionByZeroError,
+  DuplicateModelError,
+  DuplicateModuleError,
   EmptyMoneySumError,
   FlagNotAllowedError,
   IncompatibleUomCategoryError,
   InvalidAllocationError,
   InvalidCurrencyError,
   InvalidDecimalError,
+  InvalidDependsPathError,
   InvalidFieldError,
   InvalidIdentityError,
   InvalidModelError,
+  InvalidModuleError,
+  InvalidRelationError,
   InvalidUomError,
   NoEnvironmentError,
   NonIntegerNumberError,
   ShutroError,
   type ShutroErrorCode,
   TransactionScopeError,
+  UndeclaredDependencyError,
+  UnknownModelError,
   UomMismatchError,
 } from './errors.js';
 export type { CreateOf, FlagsOfField, ReadOf, WriteOf } from './model/faces.js';
@@ -125,3 +132,12 @@ export { Decimal, type DecimalInput, toDecimal } from './money/decimal.js';
 export { Money, type MoneyJson } from './money/money.js';
 export { defineUom, Quantity, type Uom, type UomInput } from './money/quantity.js';
 export type { RoundingMethod } from './money/rounding.js';
+export { defineModule, isModule, type Module, type ModuleDefinition } from './registry/module.js';
+export {
+  buildRegistry,
+  type Origin,
+  type RegisteredModel,
+  type Registry,
+  type RegistryModelDescription,
+  type RegistryOptions,
+} from './registry/registry.js';

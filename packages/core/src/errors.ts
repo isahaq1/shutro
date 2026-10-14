@@ -17,7 +17,14 @@ export type ShutroErrorCode =
   | 'COMPANY_NOT_ALLOWED'
   | 'FLAG_NOT_ALLOWED'
   | 'INVALID_FIELD'
-  | 'INVALID_MODEL';
+  | 'INVALID_MODEL'
+  | 'INVALID_MODULE'
+  | 'DUPLICATE_MODULE'
+  | 'DUPLICATE_MODEL'
+  | 'UNDECLARED_DEPENDENCY'
+  | 'UNKNOWN_MODEL'
+  | 'INVALID_RELATION'
+  | 'INVALID_DEPENDS_PATH';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -174,6 +181,73 @@ export class InvalidFieldError extends ShutroError {
 export class InvalidModelError extends ShutroError {
   constructor(model: string, problem: string, hint: string) {
     super('INVALID_MODEL', `Model '${model}': ${problem}`, hint);
+  }
+}
+
+/** A module definition that can't be right (RFC 0002 §7.1). */
+export class InvalidModuleError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('INVALID_MODULE', problem, hint);
+  }
+}
+
+/** Two different module objects share a name (e.g. two copies of `base` from different package versions). */
+export class DuplicateModuleError extends ShutroError {
+  constructor(name: string) {
+    super(
+      'DUPLICATE_MODULE',
+      `Two different modules are named '${name}'.`,
+      'Modules are identified by name; dedupe the package (one version of each module) or rename one of them.',
+    );
+  }
+}
+
+/** The same model name is defined twice (in one module or in two). */
+export class DuplicateModelError extends ShutroError {
+  constructor(model: string, modules: readonly string[]) {
+    super(
+      'DUPLICATE_MODEL',
+      `Model '${model}' is defined more than once (in ${modules.map((m) => `'${m}'`).join(' and ')}).`,
+      'A model has exactly one owner; extend it from the other module with extendModel() instead of defining it again.',
+    );
+  }
+}
+
+/** A module references a model owned by a module it doesn't depend on (RFC 0002 W2). */
+export class UndeclaredDependencyError extends ShutroError {
+  constructor(module: string, model: string, owner: string, via: string) {
+    super(
+      'UNDECLARED_DEPENDENCY',
+      `Module '${module}' references '${model}' (owned by '${owner}') in ${via}, but does not depend on '${owner}'.`,
+      `Add the '${owner}' module to the depends of '${module}'. Only models of a module and its transitive dependencies may be referenced.`,
+    );
+  }
+}
+
+/** A model name that no loaded module defines. */
+export class UnknownModelError extends ShutroError {
+  constructor(model: string, via: string | undefined) {
+    super(
+      'UNKNOWN_MODEL',
+      via === undefined
+        ? `No loaded module defines model '${model}'.`
+        : `${via} refers to model '${model}', which no loaded module defines.`,
+      'Check the model name, and make sure the module that defines it is loaded (directly or as a dependency).',
+    );
+  }
+}
+
+/** A one2many whose inverse field doesn't point back, or another broken relation. */
+export class InvalidRelationError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('INVALID_RELATION', problem, hint);
+  }
+}
+
+/** A `depends` path that doesn't resolve through real fields. */
+export class InvalidDependsPathError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('INVALID_DEPENDS_PATH', problem, hint);
   }
 }
 
