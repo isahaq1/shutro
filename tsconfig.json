@@ -2,9 +2,10 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "isolatedDeclarations": false,
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["*.ts", "test"]
+  "include": ["*.ts", "test", "scripts"]
 }

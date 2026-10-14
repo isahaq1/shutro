@@ -71,7 +71,24 @@ importers:
         specifier: ^4.10.2
         version: 4.10.2
 
-  packages/driver-pg: {}
+  packages/driver-pg:
+    dependencies:
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+    devDependencies:
+      '@shutro/sql':
+        specifier: workspace:*
+        version: link:../sql
+      '@shutro/testing':
+        specifier: workspace:*
+        version: link:../testing
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
 
   packages/i18n: {}
 
@@ -96,6 +113,9 @@ importers:
   packages/testing:
     dependencies:
       '@testcontainers/postgresql':
+        specifier: ^12.2.0
+        version: 12.2.0
+      testcontainers:
         specifier: ^12.2.0
         version: 12.2.0
 
