@@ -23,6 +23,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@testcontainers/postgresql": "^12.2.0"
+    "@testcontainers/postgresql": "^12.2.0",
+    "testcontainers": "^12.2.0"
   }
 }
