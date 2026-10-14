@@ -1,0 +1,46 @@
+# Shutro RFCs
+
+Design documents written **before** implementation (see `CLAUDE.md` → Workflow rules).
+An RFC is only implemented after it has been approved and its status set to **Accepted**.
+
+## Index
+
+| #    | Title                                         | Status | Depends on |
+| ---- | --------------------------------------------- | ------ | ---------- |
+| 0001 | [Model & field definition API](0001-model-and-field-definition.md) | Accepted | — |
+| 0002 | [Module registry & model extension](0002-module-registry-and-model-extension.md) | Accepted | 0001 |
+| 0003 | [Environment & transaction context](0003-environment-and-transaction-context.md) | Accepted | 0001, 0002 |
+| 0004 | [Recordsets, identity map & batched prefetch](0004-recordsets-identity-map-and-prefetch.md) | Accepted | 0001, 0002, 0003 |
+| 0005 | [Query builder & SQL compiler](0005-query-builder-and-sql-compiler.md) | Accepted | 0001, 0002, 0003 |
+| 0006 | [Money, decimals & currency](0006-money-decimals-and-currency.md) | Accepted | 0001, 0003, 0004, 0005 |
+
+## Lifecycle
+
+`Draft` → `In review` → `Accepted` → `Implemented` (or `Rejected` / `Superseded by NNNN`).
+
+- Changing an **Accepted** RFC requires a new revision section at the bottom, or a superseding RFC.
+- When an RFC is implemented, tick the matching roadmap checkbox in `CLAUDE.md`.
+
+## Template
+
+Every RFC uses these sections (omit only with a stated reason):
+
+1. **Summary**: what is being decided, in five lines or fewer.
+2. **Problem & ERP requirements**: what business software needs, as concrete requirements (R1, R2, …).
+3. **How Odoo does it**: the mechanism, then its weaknesses.
+4. **Prior art**: Prisma, Drizzle, Kysely, MikroORM.
+5. **Options**: two or three serious options with a trade-off table.
+6. **Decision**: the recommended option and why.
+7. **Detailed design**: API with realistic ERP examples (partner, product, sale order, invoice).
+8. **Type-level guarantees**: what the compiler rejects, with `expectTypeOf` sketches.
+9. **Runtime metadata**: what Kosh / the CLI can introspect.
+10. **Interactions**: with other RFCs.
+11. **Open questions**: decisions still needed from reviewers.
+12. **Deferred**: explicitly out of scope for this RFC.
+
+## Conventions used in examples
+
+- Example modules: `base` (res.partner, res.company, res.currency, res.users), `uom`, `product`,
+  `sale`, `account`, `stock`, `sale_stock`, `sale_margin`. Names follow Odoo so comparisons are easy.
+- Imports such as `@shutro/core` are illustrative; nothing in an RFC is a published API until implemented.
+- Money is always `Decimal` (decimal.js) in code and `numeric` in PostgreSQL. Never `number`.
