@@ -629,3 +629,22 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 - Module data files (XML/CSV/TS seed data), demo data and `noupdate` semantics: migrate RFC.
 - Runtime module install/uninstall and per-database registries: depends on open question 1.
 - Module packaging and distribution (npm conventions, version ranges in `depends`).
+
+---
+
+## Implementation notes (2026-10-14, registry: first half)
+
+`packages/core/src/registry/`. Where the implementation refines this RFC:
+
+1. **No cycle error.** `depends` takes module *objects*, and a frozen module can only reference modules defined before
+   it, so a dependency cycle can't be written. `ModuleCycleError` (§7.1) is therefore not implemented; a defensive guard
+   remains in the ordering loop.
+2. **Load order** is Kahn's algorithm with the smallest name first (§7.4 step 2). For the diamond in §7.9 that gives
+   `base, uom, product, account, sale, sale_margin, stock, sale_stock`.
+3. **Checks implemented** (§7.4 steps 1–4 and 7): duplicate modules and models, relation targets exist and belong to a
+   declared dependency (incl. the implicit `res.users` / `res.company` / `res.currency` targets, so every registry needs
+   `base`), one2many inverses, and `depends` paths through real fields.
+4. **`describe()`** adds `origin: { module }` to the model and to every field. Field-level origins become meaningful with
+   extensions.
+5. **Second half (not yet):** `extensions`, `fieldOverrides`, `overrides` with `next`, `replace()`, mixins, module
+   `flags`, method-chain composition, and the generated per-module views.
