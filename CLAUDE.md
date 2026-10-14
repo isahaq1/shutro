@@ -16,8 +16,8 @@ Shutro is NOT a general-purpose ORM. For every decision ask:
 - Database: **PostgreSQL only** (latest stable). Use its features fully:
   JSONB, row-level security, LISTEN/NOTIFY, partitioning, GROUPING SETS,
   generated columns, advisory locks.
-- Driver: `postgres` (postgres.js) or `pg` — benchmark both in Phase 1, pick one, record it in an RFC
-- Money/decimals: PostgreSQL `numeric` + `decimal.js`. **Never** JS `number` for money or quantities.
+- Driver: `postgres` (postgres.js), wrapped by `@shutro/driver-pg` (RFC 0007, measured in spike 0002)
+- Money/decimals: PostgreSQL `numeric` + `decimal.js` (isolated clone, precision 64). **Never** JS `number` for money or quantities.
 - Validation: Standard Schema compatible (users can plug in Zod, Valibot, etc.)
 - Monorepo: pnpm workspaces + Turborepo
 - Testing: Vitest + Testcontainers (real PostgreSQL) + fast-check (property-based)

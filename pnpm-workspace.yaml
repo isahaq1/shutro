@@ -1,3 +1,11 @@
 packages:
   - packages/*
   - examples/*
+  - spikes/*
+
+# Dependency install scripts are denied unless listed as true here (pnpm 11).
+# These come in through testcontainers (docker-modem/ssh2); all have pure-JS fallbacks.
+allowBuilds:
+  cpu-features: false # optional native CPU detection for ssh2
+  protobufjs: false # postinstall only prints a version notice
+  ssh2: false # native crypto bindings are optional; only used for docker-over-ssh
