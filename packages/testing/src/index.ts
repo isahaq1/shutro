@@ -1,7 +1,5 @@
 /**
  * @packageDocumentation
- * Test helpers, Testcontainers setup and factories
- *
- * Not implemented yet. See the Phase 1+ roadmap in CLAUDE.md and docs/rfcs/.
+ * Test helpers for Shutro packages: real PostgreSQL through Testcontainers (`CLAUDE.md`: tests run against real PostgreSQL).
  */
-export {};
+export { type StartedPostgres, type StartPostgresOptions, startPostgres } from './postgres.js';
