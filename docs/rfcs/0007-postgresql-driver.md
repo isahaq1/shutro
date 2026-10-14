@@ -167,3 +167,24 @@ Testcontainers PostgreSQL, and against PgBouncer in CI, with a fast-check proper
 
 - Read-replica routing and pool sizing: driver-pg implementation step.
 - Binary protocol for `numeric` / `bytea`: only if a benchmark shows text parsing to be a bottleneck (P5 shows it isn't, at ~420k rows/s with 4 numeric columns).
+
+---
+
+## Implementation notes (2026-10-14, `@shutro/driver-pg` 0.0.0)
+
+Where the implementation refines this RFC:
+
+1. **No dependency on `@shutro/core` or `@shutro/sql`.** The driver is layer 1, and `core` will depend on it (RFC 0003), so:
+   - `DriverQuery` is the structural `{ text, params }`, which `CompiledSql` satisfies without an import.
+   - `numeric` parsing is **injected** (`createDriver({ parseNumeric })`). `core` will pass `toDecimal`. The default returns
+     the exact string, which is lossless.
+   - Errors are the driver's own `DriverError` hierarchy, using the same `code` + `hint` convention as `ShutroError`.
+     `ConstraintViolationError` carries `kind`, `constraint`, `table`, `column` and `detail`. `SerializationFailureError`
+     and `DeadlockError` are `retryable`.
+2. **`date` (OID 1082) comes back as a `'YYYY-MM-DD'` string**, never a JS `Date` (RFC 0001 W7). `core` will wrap it in
+   `CalendarDate`. `timestamptz` still parses to `Date` until `Instant` exists.
+3. **`Driver.query()`** (autocommit) exists for DDL and maintenance. Business code goes through `transaction()`.
+4. **The `.unsafe(` / `postgres` import ban** is enforced by `scripts/check-forbidden.ts`, which runs in `pnpm lint` and CI,
+   because Biome can't express path-scoped call bans.
+5. **The param-in-text guard** (§7.3) rejects a query when a string parameter of 8+ characters also appears in its text.
+   It's on unless `NODE_ENV=production`, and can be turned off with `checkParamsInText: false`.
