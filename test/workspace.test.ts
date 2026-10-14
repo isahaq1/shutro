@@ -14,8 +14,13 @@ const packages = [
 ] as const;
 
 describe('workspace', () => {
-  it.each(packages)('@shutro/%s resolves through its package exports', async (name) => {
-    const mod: unknown = await import(`@shutro/${name}`);
-    expect(mod).toBeTypeOf('object');
-  });
+  it.each(packages)(
+    '@shutro/%s resolves through its package exports',
+    async (name) => {
+      const mod: unknown = await import(`@shutro/${name}`);
+      expect(mod).toBeTypeOf('object');
+    },
+    // @shutro/testing imports Testcontainers, which can take many seconds while other suites start containers.
+    60_000,
+  );
 });
