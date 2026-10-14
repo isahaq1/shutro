@@ -1,0 +1,38 @@
+{
+  "name": "shutro-monorepo",
+  "private": true,
+  "type": "module",
+  "description": "Shutro: the ORM built for business software (Node.js + TypeScript + PostgreSQL)",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "tsc -p tsconfig.json && turbo run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@changesets/cli": "^3.0.3",
+    "@shutro/audit": "workspace:*",
+    "@shutro/cli": "workspace:*",
+    "@shutro/core": "workspace:*",
+    "@shutro/driver-pg": "workspace:*",
+    "@shutro/i18n": "workspace:*",
+    "@shutro/migrate": "workspace:*",
+    "@shutro/security": "workspace:*",
+    "@shutro/sequence": "workspace:*",
+    "@shutro/sql": "workspace:*",
+    "@shutro/testing": "workspace:*",
+    "@types/node": "^24.19.2",
+    "turbo": "^2.11.7",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

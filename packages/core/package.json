@@ -1,0 +1,25 @@
+{
+  "name": "@shutro/core",
+  "version": "0.0.0",
+  "description": "Fields, defineModel, recordsets, environment, registry and compute engine (RFCs 0001-0004, 0006)",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "@shutro/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
