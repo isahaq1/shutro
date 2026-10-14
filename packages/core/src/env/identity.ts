@@ -1,0 +1,88 @@
+import { InvalidIdentityError } from '../errors.js';
+import { assertTimeZone } from './time.js';
+
+/** Who is acting, for which company, and how (RFC 0003 §7.1). */
+export interface Identity {
+  /** Id of the acting `res.users` record. */
+  readonly user: number;
+  /** Current company: defaults, sequences, currency. Must be one of `companies`. */
+  readonly company: number;
+  /** Allowed (selected) companies: the record-rule scope. Defaults to `[company]`. */
+  readonly companies?: readonly number[];
+  /** Language code such as `'bn_BD'`. Defaults to `'en_US'`. */
+  readonly lang?: string;
+  /** IANA time zone. Defaults to `'UTC'`. */
+  readonly tz?: string;
+  /** Why this unit of work runs, for jobs and system tasks (audited). */
+  readonly reason?: string;
+}
+
+/** A validated identity with defaults applied. */
+export interface ResolvedIdentity {
+  readonly uid: number;
+  readonly companyId: number;
+  readonly companyIds: readonly number[];
+  readonly lang: string;
+  readonly tz: string;
+  readonly reason: string | undefined;
+}
+
+const LANG = /^[a-z]{2,3}_[A-Z]{2}$/;
+
+function assertId(value: unknown, what: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new InvalidIdentityError(
+      `${what} must be a positive integer id, got ${JSON.stringify(value)}.`,
+      'Pass the database id of the record (a positive integer).',
+    );
+  }
+  return value;
+}
+
+/** Validates a language code (`'en_US'`, `'bn_BD'`). @throws {InvalidIdentityError} */
+export function assertLang(lang: string): string {
+  if (!LANG.test(lang)) {
+    throw new InvalidIdentityError(
+      `${JSON.stringify(lang)} is not a language code.`,
+      "Use the form 'll_CC', e.g. 'en_US' or 'bn_BD'.",
+    );
+  }
+  return lang;
+}
+
+/** Validates `reason` for superuser scopes and jobs. @throws {InvalidIdentityError} */
+export function assertReason(reason: string): string {
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new InvalidIdentityError(
+      'A reason is required.',
+      "Say why elevated access or this job runs, e.g. { reason: 'payment-webhook: register payment' }; it is recorded in the audit trail.",
+    );
+  }
+  return reason;
+}
+
+/** Applies defaults and validates. @throws {InvalidIdentityError} */
+export function resolveIdentity(identity: Identity): ResolvedIdentity {
+  const uid = assertId(identity.user, 'user');
+  const companyId = assertId(identity.company, 'company');
+  const companyIds =
+    identity.companies === undefined
+      ? [companyId]
+      : identity.companies.map((c) => assertId(c, 'companies[]'));
+  if (!companyIds.includes(companyId)) {
+    throw new InvalidIdentityError(
+      `The current company ${companyId} is not in the allowed companies [${companyIds.join(', ')}].`,
+      'Include the current company in `companies`, or omit `companies` to allow only the current one.',
+    );
+  }
+  const tz = identity.tz ?? 'UTC';
+  assertTimeZone(tz);
+  return {
+    uid,
+    companyId,
+    companyIds: Object.freeze([...companyIds]),
+    lang: assertLang(identity.lang ?? 'en_US'),
+    tz,
+    reason: identity.reason === undefined ? undefined : assertReason(identity.reason),
+  };
+}

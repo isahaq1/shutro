@@ -23,9 +23,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@shutro/driver-pg": "workspace:*",
+    "@shutro/sql": "workspace:*",
     "decimal.js": "^10.6.0"
   },
   "devDependencies": {
+    "@shutro/testing": "workspace:*",
     "fast-check": "^4.10.2"
   }
 }

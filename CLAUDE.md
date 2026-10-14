@@ -172,7 +172,7 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Driver layer, transactions, savepoints (`@shutro/driver-pg`, RFC 0007; replica routing deferred)
 - [ ] SQL compiler (select/insert/update/delete, joins, aggregates)
 - [ ] Basic fields + CRUD + relations (many2one, one2many, many2many)
-- [ ] Environment via AsyncLocalStorage
+- [x] Environment via AsyncLocalStorage (`createShutro`, `Env`; `env.model()` comes with the registry)
 - [ ] Recordsets with batched prefetch
 
 ### Phase 2 — Schema & modules
