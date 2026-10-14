@@ -172,8 +172,7 @@ Shape syntax:
 | --------- | ------- |
 | `['a', 'b']` on a model | Exactly these scalar fields (plus `id`). Used for wide tables (W2). |
 | `true` | `Default<M>` for that relation. |
-| `{ rel: spec }` | Nested. |
-| `{ '*': true, rel: … }` | Default plus nested. |
+| `{ rel: spec }` | Nested: the relation's `Default<T>` columns **plus** the nested relations in `spec`. Only the array form narrows columns. (Amended after spike 0001: the runtime query selects default columns anyway, so the types now match.) |
 | Non-stored computed fields in a spec | Their `depends` are loaded and the compute runs (batched) as part of the load. |
 
 `load()` returns the *same* records (same identity, same group) with a widened type. Loading something already in the
@@ -425,7 +424,7 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 
 | # | Resolution |
 | - | ---------- |
-| 1 | **Fallback accepted.** If the Phase 1 type benchmark fails, only top-level loaded fields are tracked in types, and nested access is runtime-checked. |
+| 1 | **Measured, and the full design is kept.** [Spike 0001](../spikes/0001-recordset-type-cost.md): full nested tracking costs 0.62 s for a 300-model project on TS 7 (1.16 s with Odoo-sized models) and 1.7–3.6 ms per usage function. All criteria pass. The top-level-only fallback stays documented but is not used. |
 | 2 | **`search()` selects `Default<M>`**, with `search(q, { load: [...] })` and `search(q, { load: false })` to narrow it. |
 | 3 | **No deferred creates in v1.** `create()` inserts immediately in one multi-row statement. |
 
