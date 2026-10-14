@@ -7,7 +7,10 @@ export type SqlErrorCode =
   | 'SQL_INVALID_PARAM'
   | 'SQL_INVALID_IDENTIFIER'
   | 'SQL_INVALID_TYPE'
-  | 'SQL_TOO_MANY_PARAMS';
+  | 'SQL_TOO_MANY_PARAMS'
+  | 'SQL_EMPTY_SELECT'
+  | 'SQL_EMPTY_VALUES'
+  | 'SQL_INVALID_OPERATOR';
 
 /**
  * Raised when a SQL fragment can't be built or compiled safely. The message says what went wrong, and

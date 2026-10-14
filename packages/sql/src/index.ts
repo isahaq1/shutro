@@ -21,6 +21,35 @@ export {
   type TextNode,
   visit,
 } from './ast.js';
+export {
+  type AddTable,
+  type ColumnRef,
+  createQueryBuilder,
+  DeleteQuery,
+  InsertQuery,
+  type Query,
+  type QueryBuilder,
+  type RowOf,
+  type Schema,
+  type Scope,
+  SelectQuery,
+  type SelectRef,
+  type TableExpr,
+  UpdateQuery,
+} from './builder/builder.js';
+export {
+  type AliasedExpression,
+  type ColumnTypeOf,
+  type Expression,
+  type ExpressionBuilder,
+  type Fragmentable,
+  type FunctionBuilder,
+  isExpression,
+  type ListOperator,
+  type NullOperator,
+  type Operator,
+  type ValueOperator,
+} from './builder/expression.js';
 export { type CompiledSql, compile, MAX_PARAMS } from './compile.js';
 export { SqlError, type SqlErrorCode } from './errors.js';
 export { type SqlTag, sql } from './tag.js';
