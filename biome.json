@@ -33,6 +33,9 @@
       "correctness": {
         "noUnusedImports": "error",
         "noUnusedVariables": "error"
+      },
+      "complexity": {
+        "useLiteralKeys": "off"
       }
     }
   },

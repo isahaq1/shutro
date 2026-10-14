@@ -757,3 +757,19 @@ Resolved on 2026-10-14 (the recommended option was accepted for each). The origi
    `companyDependent`. They come with `defineModel()` and the registry, which they need for path checks.
 8. **Excess-property checking on builder options** uses an `Exact<O, Options>` intersection, because a generic `const O
    extends Options` parameter alone only triggers TypeScript's weak-type check (one typo among valid keys would pass).
+
+## Implementation notes (2026-10-14, `defineModel()`: second half of the model layer)
+
+`packages/core/src/model/model.ts`. Where the implementation refines this RFC:
+
+1. **Sibling checks ride on phantom types.** `MonetaryField` / `QuantityField` carry the sibling key as a literal type and
+   the flags carry the compute method name, so `defineModel` can reject `currency: 'currnecy'`, `currency: 'partner'`
+   (a `many2one('res.partner')`) and `compute: 'computeB'` at compile time. The rule type is deliberately
+   non-homomorphic so it never becomes an inference source for the fields record.
+2. **`tracking` is both a model option and a field option.** `describe()` reports a field as tracked when either says so.
+3. **`describe()` uses `null` for absent values and adds kind-specific keys only where they apply**, so the output is stable JSON.
+4. **Reserved keys** (§7.5) are the implicit field names and the recordset API (`load`, `write`, `search`, `ensureOne`, …);
+   `displayName` is the only implicit field a model may redefine.
+5. **Default ordering is `['id asc']`**, and `recName` defaults to `name` when the model has one.
+6. **Not yet:** `constraints.check` / `methods` receive untyped records until recordsets exist; `f.related`, `f.reference`,
+   `companyDependent` and Standard Schema `validate` wait for the registry and the recordset layer.

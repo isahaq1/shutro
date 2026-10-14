@@ -30,6 +30,7 @@ export {
   InvalidDecimalError,
   InvalidFieldError,
   InvalidIdentityError,
+  InvalidModelError,
   InvalidUomError,
   NoEnvironmentError,
   NonIntegerNumberError,
@@ -38,7 +39,7 @@ export {
   TransactionScopeError,
   UomMismatchError,
 } from './errors.js';
-export type { CreateOf, ReadOf, WriteOf } from './model/faces.js';
+export type { CreateOf, FlagsOfField, ReadOf, WriteOf } from './model/faces.js';
 export {
   type BinaryField,
   type BinaryOptions,
@@ -83,6 +84,37 @@ export {
   type X2ManyOptions,
 } from './model/field.js';
 export { asId, type Id, type X2ManyCommands } from './model/id.js';
+export {
+  type ActiveField,
+  type AnyModel,
+  type CompanyField,
+  type CompanyScope,
+  type ConstraintSpec,
+  defineModel,
+  type FieldDescription,
+  type FieldRules,
+  type FieldsRecord,
+  humanize,
+  type ImplicitFields,
+  type ImplicitFieldsBase,
+  type IndexSpec,
+  isModel,
+  type MethodsRecord,
+  type Model,
+  type ModelDefinition,
+  type ModelDescription,
+  type ModelFields,
+  type OrderSpec,
+  type OrderTerm,
+  RESERVED_KEYS,
+  type ReservedKey,
+  type ResolvedConstraint,
+  type ResolvedIndex,
+  type ResolvedSqlConstraint,
+  type SqlCheckConstraint,
+  type SqlUniqueConstraint,
+  snakeCase,
+} from './model/model.js';
 export {
   type Currency,
   type CurrencyInput,

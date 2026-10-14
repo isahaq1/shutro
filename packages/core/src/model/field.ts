@@ -51,6 +51,8 @@ export interface FieldFlags {
   readonly inverse: boolean;
   readonly hasDefault: boolean;
   readonly sequence: boolean;
+  /** The method name when `compute` is a string (phantom; drives the methods check in `defineModel`). */
+  readonly computeName?: string | undefined;
 }
 
 /** Phantom read/write types and flags of a field. */
@@ -205,14 +207,14 @@ export interface DecimalField<Fl extends FieldFlags>
   readonly precision: number | undefined;
 }
 /** `f.monetary` descriptor. */
-export interface MonetaryField<Fl extends FieldFlags>
+export interface MonetaryField<C extends string, Fl extends FieldFlags>
   extends FieldBase<'monetary', Money, Decimal | string, Fl> {
-  readonly currencyField: string;
+  readonly currencyField: C;
 }
 /** `f.quantity` descriptor. */
-export interface QuantityField<Fl extends FieldFlags>
+export interface QuantityField<U extends string, Fl extends FieldFlags>
   extends FieldBase<'quantity', Quantity, Decimal | string, Fl> {
-  readonly uomField: string;
+  readonly uomField: U;
   readonly scale: number | string | undefined;
 }
 /** `f.selection` descriptor. */
@@ -286,6 +288,7 @@ export type FlagsOf<
   readonly computed: Present<O, 'compute'>;
   readonly inverse: Present<O, 'inverse'>;
   readonly sequence: Present<O, 'sequence'>;
+  readonly computeName: O extends { compute: infer Cm extends string } ? Cm : undefined;
   readonly hasDefault: Present<O, 'default'> extends true
     ? true
     : D extends { hasDefault: true }
@@ -624,7 +627,7 @@ export const f = {
   /** An amount in the currency of the sibling `currency` field (read as `Money`, RFC 0006). */
   monetary<const O extends MonetaryOptions>(
     options: O & Exact<O, MonetaryOptions> & ComputeRules<O>,
-  ): MonetaryField<FlagsOf<O>> {
+  ): MonetaryField<O['currency'], FlagsOf<O>> {
     assertFieldKey(options.currency, 'currency field name');
     assertDecimalDefault(options.default, 'monetary');
     return make({
@@ -632,13 +635,13 @@ export const f = {
       pgType: 'numeric',
       ...normalize(options),
       currencyField: options.currency,
-    }) as MonetaryField<FlagsOf<O>>;
+    }) as MonetaryField<O['currency'], FlagsOf<O>>;
   },
 
   /** A quantity in the unit of the sibling `uom` field (read as `Quantity`). */
   quantity<const O extends QuantityOptions>(
     options: O & Exact<O, QuantityOptions> & ComputeRules<O>,
-  ): QuantityField<FlagsOf<O>> {
+  ): QuantityField<O['uom'], FlagsOf<O>> {
     assertFieldKey(options.uom, 'uom field name');
     assertDecimalDefault(options.default, 'quantity');
     return make({
@@ -647,7 +650,7 @@ export const f = {
       ...normalize(options),
       uomField: options.uom,
       scale: options.scale,
-    }) as QuantityField<FlagsOf<O>>;
+    }) as QuantityField<O['uom'], FlagsOf<O>>;
   },
 
   /** A calendar date (`'YYYY-MM-DD'`), never a JS `Date` (RFC 0001 W7). */
@@ -886,3 +889,36 @@ export const f = {
 
 /** The type of the `f` builders. */
 export type FieldBuilders = typeof f;
+
+// ------------------------------------------------------------------------------------- model-internal helpers
+
+/** The implicit `id` field: `bigint GENERATED ALWAYS AS IDENTITY`, read as a branded number. */
+export interface IdField<N extends string>
+  extends FieldBase<
+    'bigint',
+    Id<N>,
+    never,
+    {
+      required: true;
+      readonly: true;
+      computed: false;
+      inverse: false;
+      hasDefault: false;
+      sequence: false;
+    }
+  > {
+  readonly identity: true;
+}
+
+/** @internal Used by `defineModel` for the implicit `id` field. */
+export function implicitIdField<N extends string>(model: N): IdField<N> {
+  void model;
+  const base = normalize({ required: true, readonly: true, label: 'ID', copy: false });
+  return make({ kind: 'bigint', pgType: 'bigint', ...base, identity: true as const }) as IdField<N>;
+}
+
+/** @internal Returns the same descriptor with `label` filled in when it was missing. */
+export function withDefaultLabel<F extends Field>(field: F, label: string): F {
+  if (field.label !== undefined) return field;
+  return make({ ...field, label });
+}
