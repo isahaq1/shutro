@@ -63,7 +63,7 @@ test('read faces', () => {
   expectTypeOf<R['note']>().toEqualTypeOf<string | null>();
   expectTypeOf<R['active']>().toEqualTypeOf<boolean>(); // never null
   expectTypeOf<R['priority']>().toEqualTypeOf<number | null>(); // a default does not make it non-null
-  expectTypeOf<R['big']>().toEqualTypeOf<bigint | null>();
+  expectTypeOf<R['big']>().toEqualTypeOf<number | null>(); // bigint columns read as safe numbers (driver guard)
   expectTypeOf<R['ratio']>().toEqualTypeOf<number | null>();
   expectTypeOf<R['discount']>().toEqualTypeOf<Decimal | null>();
   expectTypeOf<R['partner']>().toEqualTypeOf<{ readonly id: Id<'res.partner'> }>();

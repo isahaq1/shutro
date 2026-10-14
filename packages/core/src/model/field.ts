@@ -53,6 +53,8 @@ export interface FieldFlags {
   readonly sequence: boolean;
   /** The method name when `compute` is a string (phantom; drives the methods check in `defineModel`). */
   readonly computeName?: string | undefined;
+  /** Persisted as a column (phantom; `undefined` means not stored). */
+  readonly store?: boolean | undefined;
 }
 
 /** Phantom read/write types and flags of a field. */
@@ -289,6 +291,7 @@ export type FlagsOf<
   readonly inverse: Present<O, 'inverse'>;
   readonly sequence: Present<O, 'sequence'>;
   readonly computeName: O extends { compute: infer Cm extends string } ? Cm : undefined;
+  readonly store: Present<O, 'compute'> extends true ? IsTrue<O, 'store'> : true;
   readonly hasDefault: Present<O, 'default'> extends true
     ? true
     : D extends { hasDefault: true }
@@ -564,13 +567,13 @@ export const f = {
     >;
   },
 
-  /** 64-bit integer, read as `bigint`. */
+  /** 64-bit integer. Read as a safe `number` (the driver rejects larger values); write `bigint` or `number`. */
   bigint<const O extends CommonOptions<bigint | number> = NoOptions>(
     options?: O & Exact<O, CommonOptions<bigint | number>> & ComputeRules<O>,
-  ): ScalarField<'bigint', bigint, bigint | number, FlagsOf<O>> {
+  ): ScalarField<'bigint', number, bigint | number, FlagsOf<O>> {
     return make({ kind: 'bigint', pgType: 'bigint', ...normalize(options ?? {}) }) as ScalarField<
       'bigint',
-      bigint,
+      number,
       bigint | number,
       FlagsOf<O>
     >;
