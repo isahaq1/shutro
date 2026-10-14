@@ -118,7 +118,9 @@ Values stay strings in TS, and computations are pushed to PostgreSQL `numeric`.
 
 **Option B.**
 
-1. **`Decimal`** is an isolated decimal.js constructor created with `Decimal.clone({ precision: 40, rounding: ROUND_HALF_UP })`.
+1. **`Decimal`** is an isolated decimal.js constructor created with `Decimal.clone({ precision: 64, rounding: ROUND_HALF_UP })`.
+   *(Amended 2026-10-14: originally 40. [Spike 0002](../spikes/0002-driver-benchmark.md) K1 showed sums of
+   42-significant-digit values rounding at 40; unconstrained `numeric` columns can hold more. RFC 0007.)*
    Shutro **never mutates the global decimal.js config** (`CLAUDE.md`: no global mutable state). The type is re-exported as
    `@shutro/core`'s `Decimal`, so the implementation can be swapped later (e.g. for a native TC39 Decimal).
 2. **`Money`** is immutable, with a currency reference (id, code, rounding, decimal places, rounding method).

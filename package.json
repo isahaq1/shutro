@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "typecheck": "tsc -p tsconfig.json && tsc -p spikes/recordset-types && turbo run typecheck",
+    "typecheck": "tsc -p tsconfig.json && tsc -p spikes/recordset-types && tsc -p spikes/driver-bench && turbo run typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check .",
