@@ -1,0 +1,6 @@
+.shutro/
+node_modules/
+dist/
+.turbo/
+coverage/
+*.log
