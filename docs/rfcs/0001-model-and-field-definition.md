@@ -732,3 +732,28 @@ Resolved on 2026-10-14 (the recommended option was accepted for each). The origi
 - Field-level security (`groups`) and record rules: security RFC.
 - Delegation inheritance (`_inherits`, product.template ↔ product.product): RFC 0002 §7.8 sketch, then its own RFC.
 - Translation storage details: i18n RFC.
+
+---
+
+## Implementation notes (2026-10-14, field builders: first half of the model layer)
+
+`packages/core/src/model/field.ts`, `faces.ts`, `id.ts`. Where the implementation refines this RFC:
+
+1. **Value types that don't exist yet.** `date` reads/writes a `'YYYY-MM-DD'` string and `datetime` a JS `Date`, matching
+   what the driver and the environment return today. They become `CalendarDate` / `Instant` with Q3 (Temporal-shaped
+   value classes), as a type-only change for user code that treats them opaquely.
+2. **Relation read faces are placeholders:** many2one reads `{ id: Id<T> }`, x2many reads `{ model: T }`. RFC 0004's
+   recordset layer replaces them with `Record<T>` / `RecordSet<T>` (the spike's loaded-shape types read the descriptor's
+   `kind` and `target`, not these faces).
+3. **Boolean and x2many fields carry `required: true, hasDefault: true` in their flags.** That encodes "never null, never
+   mandatory on create" (`false` / the empty set) without special-casing the face types.
+4. **Readonly is one derived flag:** explicit `readonly`, a `sequence`, a `compute` without `inverse`, or `state`. Create and
+   write exclude exactly the readonly fields; mandatory = required without default or sequence. §8's expectations hold.
+5. **`one2many`'s inverse field is stored as `inverseField`**, because `inverse` on every descriptor is the compute inverse
+   function.
+6. **Sibling references use TypeScript keys** (`currency: 'weightUom'` is camelCase); column and relation-table names are
+   snake_case. Both are validated.
+7. **Not implemented yet:** `f.reference`, `f.related`, Standard Schema validation on `json`/`char` (`validate`), and
+   `companyDependent`. They come with `defineModel()` and the registry, which they need for path checks.
+8. **Excess-property checking on builder options** uses an `Exact<O, Options>` intersection, because a generic `const O
+   extends Options` parameter alone only triggers TypeScript's weak-type check (one typo among valid keys would pass).
