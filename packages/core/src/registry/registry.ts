@@ -9,9 +9,11 @@ import {
   ExtensionConflictError,
   InvalidDependsPathError,
   InvalidExtensionError,
+  InvalidModuleError,
   InvalidRelationError,
   UndeclaredDependencyError,
   UnknownModelError,
+  UnknownSequenceError,
 } from '../errors.js';
 import {
   type Field,
@@ -38,6 +40,7 @@ import { isModule, type Module, type ModuleBase } from './module.js';
 
 // ------------------------------------------------------------------------------------------------- schema types
 
+import type { SequenceDefinition } from '@shutro/sequence';
 import { buildComputeGraph, type ComputeGraph } from '../compute/graph.js';
 
 type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
@@ -120,6 +123,8 @@ export interface Registry<S = unknown> {
   readonly models: ReadonlyMap<string, RegisteredModel>;
   /** The compute dependency graph (RFC 0008 §9). */
   readonly compute: ComputeGraph;
+  /** Document sequences by code (RFC 0012 §7.1). */
+  readonly sequences: ReadonlyMap<string, SequenceDefinition>;
   has(name: string): boolean;
   /** @throws {UnknownModelError} */
   get(name: string): RegisteredModel;
@@ -585,6 +590,19 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     return found;
   };
 
+  const sequences = new Map<string, SequenceDefinition>();
+  for (const module of modules) {
+    for (const definition of module.sequences) {
+      if (sequences.has(definition.code)) {
+        throw new InvalidModuleError(
+          `Module '${module.name}' declares the sequence '${definition.code}', which another module already declares.`,
+          'Sequence codes are global: prefix them with the module name, or declare the sequence once.',
+        );
+      }
+      sequences.set(definition.code, definition);
+    }
+  }
+
   for (const registered of models.values()) {
     const { model } = registered;
     for (const [key, field] of Object.entries(model.fields)) {
@@ -621,6 +639,25 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
           );
         }
       }
+      if (field.sequence !== undefined) {
+        const definition = sequences.get(field.sequence.code);
+        if (definition === undefined) throw new UnknownSequenceError(field.sequence.code, where);
+        if (field.sequence.gapless !== undefined && field.sequence.gapless !== definition.gapless) {
+          throw new InvalidModuleError(
+            `${where} declares the sequence '${definition.code}' as ${field.sequence.gapless ? 'gapless' : 'standard'}, but the definition says ${definition.gapless ? 'gapless' : 'standard'}.`,
+            'The definition is authoritative: drop gapless from the field, or change the definition.',
+          );
+        }
+        if (
+          field.sequence.dateField !== undefined &&
+          model.fields[field.sequence.dateField] === undefined
+        ) {
+          throw new InvalidModuleError(
+            `${where} names dateField '${field.sequence.dateField}', which is not a field of '${model.name}'.`,
+            'Point dateField at a date / datetime field of the model.',
+          );
+        }
+      }
       for (const path of field.depends) {
         let current = registered;
         const segments = path.split('.');
@@ -650,6 +687,7 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
   const registry: Registry<Simplify<SchemaOfModules<Mods>>> = {
     modules: Object.freeze(modules),
     compute: buildComputeGraph(models),
+    sequences,
     loadOrder: Object.freeze(modules.map((m) => m.name)),
     models,
     has: (name) => models.has(name),

@@ -11,6 +11,7 @@ import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { targetOf } from '../registry/registry.js';
 import { junctionTable } from './relations.js';
+import { fillSequences, UNNUMBERED } from './sequences.js';
 import {
   arrayType,
   bindValue,
@@ -169,8 +170,10 @@ export async function createRecords(
       if (key === 'createdAt' || key === 'updatedAt') value = internals.now;
       else if (key === 'createdBy' || key === 'updatedBy') value = internals.uid;
       else value = defaultOf(field, internals.env) ?? null;
-      // Stored computes are filled after the insert (RFC 0008 §7.6).
-      if (value === null && field.required && !field.computed) missing.push(key);
+      // Stored computes are filled after the insert (RFC 0008 §7.6); sequences before it (RFC 0012 §7.4).
+      if (value === null && field.sequence?.on === 'manual' && field.required) value = UNNUMBERED;
+      if (value === null && field.required && !field.computed && field.sequence === undefined)
+        missing.push(key);
       stored.set(
         key,
         value === null
@@ -187,6 +190,8 @@ export async function createRecords(
       );
     return { stored, commands };
   });
+
+  await fillSequences(internals, model, prepared);
 
   const ids: number[] = [];
   for (let i = 0; i < prepared.length; i += CHUNK) {

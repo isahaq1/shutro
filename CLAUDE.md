@@ -186,7 +186,7 @@ await shutro.run({ user, company }, async (env) => {
 - [x] State machines (RFC 0010: generated transition methods, guards, state/transition events, statesAdd/transitionsAdd)
 - [x] Multi-company & multi-currency (company filtering, checkCompany links, env.fx dated per-company conversion)
 - [x] Translations (JSONB) (RFC 0011: translate: true fields, env.lang reads with source fallback, SQL-side COALESCE for filters and sorts)
-- [ ] Sequences (incl. gapless)
+- [x] Sequences (incl. gapless) (RFC 0012: module-declared sequences, range allocation per company/period, gapless in-transaction vs standard autonomous, assignNumber for posting)
 - [ ] Audit trail
 
 ### Phase 4 — Security

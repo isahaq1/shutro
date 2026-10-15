@@ -73,6 +73,9 @@ importers:
       '@shutro/i18n':
         specifier: workspace:*
         version: link:../i18n
+      '@shutro/sequence':
+        specifier: workspace:*
+        version: link:../sequence
       '@shutro/sql':
         specifier: workspace:*
         version: link:../sql
@@ -126,7 +129,11 @@ importers:
 
   packages/security: {}
 
-  packages/sequence: {}
+  packages/sequence:
+    dependencies:
+      '@shutro/sql':
+        specifier: workspace:*
+        version: link:../sql
 
   packages/sql:
     devDependencies:
