@@ -15,6 +15,8 @@ export interface Identity {
   readonly tz?: string;
   /** Why this unit of work runs, for jobs and system tasks (audited). */
   readonly reason?: string;
+  /** Security group codes of the user (RFC 0014 §7.1); implied groups are added by the registry. */
+  readonly groups?: readonly string[];
 }
 
 /** A validated identity with defaults applied. */
@@ -25,6 +27,7 @@ export interface ResolvedIdentity {
   readonly lang: string;
   readonly tz: string;
   readonly reason: string | undefined;
+  readonly groups: readonly string[];
 }
 
 const LANG = /^[a-z]{2,3}_[A-Z]{2}$/;
@@ -84,5 +87,15 @@ export function resolveIdentity(identity: Identity): ResolvedIdentity {
     lang: assertLang(identity.lang ?? 'en_US'),
     tz,
     reason: identity.reason === undefined ? undefined : assertReason(identity.reason),
+    groups: Object.freeze(
+      [...(identity.groups ?? [])].map((g) => {
+        if (typeof g !== 'string' || g === '')
+          throw new InvalidIdentityError(
+            `${JSON.stringify(g)} is not a group code.`,
+            "Pass group codes such as 'sale.user'.",
+          );
+        return g;
+      }),
+    ),
   };
 }

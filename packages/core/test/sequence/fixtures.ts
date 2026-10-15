@@ -83,5 +83,5 @@ export const account = defineModule({
   models: [AccountMove],
 });
 
-export const registry = buildRegistry({ modules: [sale, account] });
+export const registry = buildRegistry({ modules: [sale, account], security: { enforce: false } });
 export type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;

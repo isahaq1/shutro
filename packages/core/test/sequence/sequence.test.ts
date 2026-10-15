@@ -41,7 +41,9 @@ describe('sequence declarations', () => {
       sequences: [defineSequence({ code: 'sale.order' })],
       models: [],
     });
-    expect(() => buildRegistry({ modules: [dup] })).toThrow(InvalidModuleError);
+    expect(() => buildRegistry({ modules: [dup], security: { enforce: false } })).toThrow(
+      InvalidModuleError,
+    );
 
     const Mismatch = defineModel('x.mismatch', {
       fields: { name: f.char({ sequence: { code: 'sale.order', gapless: true } }) },

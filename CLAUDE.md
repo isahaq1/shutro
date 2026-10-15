@@ -190,9 +190,9 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Audit trail (RFC 0013: append-only shutro_audit with trigger, tracked writes/creates/unlinks/transitions/numbering/recomputes, coalesced per transaction, records.trail())
 
 ### Phase 4 — Security
-- [ ] Model ACL, record rules, field security
-- [ ] PostgreSQL RLS integration
-- [ ] Encrypted fields
+- [x] Model ACL, record rules, field security (RFC 0014: groups with implies, default-deny ACL, rules compiled into every user read/write/delete, field groups)
+- [x] PostgreSQL RLS integration (rlsStatements(registry): policies from record rules over the session settings)
+- [x] Encrypted fields (AES-256-GCM with an application key ring, rotation by key id)
 
 ### Phase 5 — DX & performance
 - [ ] CLI, query inspector, schema explorer

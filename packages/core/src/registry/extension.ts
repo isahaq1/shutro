@@ -2,6 +2,7 @@
  * `extendModel()` (RFC 0002 §7.2–7.3): a module's contribution to a model owned by a dependency. Extensions are
  * plain data; the registry applies them in load order and enforces the view-safety rules.
  */
+import type { AccessSpec, FieldGroupsInput, RuleSpec } from '@shutro/security';
 import { InvalidExtensionError } from '../errors.js';
 import {
   type Field,
@@ -52,7 +53,7 @@ export interface FieldOverride {
   readonly index?: IndexKind;
   readonly tracking?: boolean;
   readonly copy?: boolean;
-  readonly groups?: readonly string[];
+  readonly groups?: FieldGroupsInput;
   /** May only tighten (`true`), and then needs a default (here or on the field). */
   readonly required?: boolean;
   /** New values for an `extensible` selection or state. */
@@ -75,6 +76,10 @@ export interface ExtensionDefinition<Fs extends FieldsRecord, Ms extends Methods
   readonly constraints?: Readonly<Record<string, ConstraintSpec>>;
   /** Onchange handlers for fields without one (an existing key is a conflict). */
   readonly onchange?: Readonly<Record<string, OnchangeFn>>;
+  /** Permissions to add (never removed). */
+  readonly access?: AccessSpec;
+  /** Record rules to add (an existing key is a conflict). */
+  readonly rules?: Readonly<Record<string, RuleSpec>>;
   readonly sqlConstraints?: Readonly<
     Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>
   >;
@@ -98,6 +103,8 @@ export interface Extension<
   >;
   readonly constraints: Readonly<Record<string, ConstraintSpec>>;
   readonly onchange: Readonly<Record<string, OnchangeFn>>;
+  readonly access: AccessSpec;
+  readonly rules: Readonly<Record<string, RuleSpec>>;
   readonly sqlConstraints: Readonly<
     Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>
   >;
@@ -221,6 +228,8 @@ export function extendModel<
     overrides: Object.freeze(overrides),
     constraints: Object.freeze({ ...(definition.constraints ?? {}) }),
     onchange: Object.freeze({ ...(definition.onchange ?? {}) }),
+    access: Object.freeze({ ...(definition.access ?? {}) }),
+    rules: Object.freeze({ ...(definition.rules ?? {}) }),
     sqlConstraints: Object.freeze({ ...(definition.sqlConstraints ?? {}) }),
     indexes: Object.freeze([...(definition.indexes ?? [])]),
     tracking: Object.freeze([...(definition.tracking ?? [])]),

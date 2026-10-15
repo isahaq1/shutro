@@ -4,6 +4,7 @@
  */
 
 import {
+  AUDIT_TABLE,
   type AuditEntry,
   type AuditRowInput,
   auditTableStatements,
@@ -22,7 +23,13 @@ const ensured = new WeakSet<Driver>();
 
 async function ensureTable(driver: Driver): Promise<void> {
   if (ensured.has(driver)) return;
-  for (const statement of auditTableStatements()) await driver.query(statement);
+  // Created by migrations in production (the application role may not own the schema); on first use otherwise.
+  const [row] = await driver.query<{ present: boolean }>({
+    text: `SELECT to_regclass('${AUDIT_TABLE}') IS NOT NULL AS present`,
+    params: [],
+  });
+  if (row?.present !== true)
+    for (const statement of auditTableStatements()) await driver.query(statement);
   ensured.add(driver);
 }
 
@@ -57,6 +64,7 @@ export function auditValue(
   siblings: (key: string) => unknown,
 ): unknown {
   if (raw === undefined || raw === null) return null;
+  if (model.fields[key]?.encrypted) return '[encrypted]';
   const field = model.fields[key] as
     | (Field & { currencyField?: string; uomField?: string })
     | undefined;

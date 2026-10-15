@@ -2,7 +2,9 @@
  * Field builders (`f.*`) and descriptors, RFC 0001 §7.3. A descriptor is frozen runtime metadata (what Kosh and
  * the migrator read) plus phantom types that carry the field's read / create / write faces.
  */
+
 import type { Translations } from '@shutro/i18n';
+import { type FieldGroups, type FieldGroupsInput, normalizeFieldGroups } from '@shutro/security';
 import type { Env } from '../env/env.js';
 import { InvalidFieldError, ShutroError } from '../errors.js';
 import type { Decimal } from '../money/decimal.js';
@@ -96,10 +98,12 @@ export interface FieldBase<K extends FieldKind, R, W, Fl extends FieldFlags> {
   readonly tracking: boolean;
   /** Column-name override. */
   readonly column: string | undefined;
-  readonly groups: readonly string[];
+  readonly groups: FieldGroups;
   readonly deprecated: string | undefined;
   readonly sequence: SequenceFieldOptions | undefined;
   readonly translate: boolean;
+  /** Stored encrypted with the application keys (RFC 0014 §7.6); char / text only. */
+  readonly encrypted: boolean;
   /** Phantom. Never present at runtime. */
   readonly '~types'?: FieldTypes<R, W, Fl>;
 }
@@ -115,7 +119,8 @@ export interface CommonOptions<V> {
   readonly copy?: boolean;
   readonly tracking?: boolean;
   readonly column?: string;
-  readonly groups?: readonly string[];
+  /** Groups that may read / write the field (RFC 0014 §7.4): an array for both, or { read, write }. */
+  readonly groups?: FieldGroupsInput;
   readonly deprecated?: string;
   /** Persist a computed field (recomputed in batches before commit). */
   readonly store?: boolean;
@@ -130,6 +135,8 @@ export interface CommonOptions<V> {
 export interface TextOptions extends CommonOptions<string> {
   /** Store per-language values as JSONB (RFC 0001 §7.3). */
   readonly translate?: boolean;
+  /** Encrypt at rest with the application's keys (RFC 0014 §7.6). Not searchable, not translatable. */
+  readonly encrypted?: boolean;
 }
 /** Options of `f.char`. */
 export interface CharOptions extends TextOptions {
@@ -463,10 +470,11 @@ interface Normalized {
   readonly copy: boolean;
   readonly tracking: boolean;
   readonly column: string | undefined;
-  readonly groups: readonly string[];
+  readonly groups: FieldGroups;
   readonly deprecated: string | undefined;
   readonly sequence: SequenceFieldOptions | undefined;
   readonly translate: boolean;
+  readonly encrypted: boolean;
 }
 
 interface Defaults {
@@ -479,8 +487,9 @@ interface Defaults {
 
 /** Options as builders pass them: every key optional and possibly `undefined`. */
 type LooseOptions = {
-  readonly [K in keyof (CommonOptions<unknown> & SequenceOption & { translate?: boolean })]?:
-    | (CommonOptions<unknown> & SequenceOption & { translate?: boolean })[K]
+  readonly [K in keyof (CommonOptions<unknown> &
+    SequenceOption & { translate?: boolean; encrypted?: boolean })]?:
+    | (CommonOptions<unknown> & SequenceOption & { translate?: boolean; encrypted?: boolean })[K]
     | undefined;
 };
 
@@ -558,10 +567,11 @@ function normalize(options: LooseOptions, defaults: Defaults = {}): Normalized {
     copy: options.copy ?? true,
     tracking: options.tracking ?? false,
     column: options.column,
-    groups: Object.freeze([...(options.groups ?? [])]),
+    groups: normalizeFieldGroups(options.groups),
     deprecated: options.deprecated,
     sequence,
     translate: options.translate ?? false,
+    encrypted: options.encrypted ?? false,
   };
 }
 
@@ -577,7 +587,13 @@ function textLike<K extends 'char' | 'text' | 'html'>(
   pgType: string,
 ): FieldBase<K, string, string, FieldFlags> {
   const base = normalize(options);
-  return make({ kind, pgType: base.translate ? 'jsonb' : pgType, ...base });
+  if (base.translate && base.encrypted)
+    throw new InvalidFieldError('A field cannot be both translate and encrypted.', 'Pick one.');
+  return make({
+    kind,
+    pgType: base.translate ? 'jsonb' : base.encrypted ? 'text' : pgType,
+    ...base,
+  });
 }
 
 // -------------------------------------------------------------------------------------------------- builders
@@ -1039,7 +1055,7 @@ export interface FieldOverrideChanges {
   readonly index?: IndexKind;
   readonly tracking?: boolean;
   readonly copy?: boolean;
-  readonly groups?: readonly string[];
+  readonly groups?: FieldGroups;
   readonly required?: boolean;
   /** Replaces the selection list (used by `selectionAdd` after validation). */
   readonly selection?: readonly (readonly [string, string])[];

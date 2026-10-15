@@ -75,7 +75,10 @@ describe('buildRegistry: load order', () => {
     const sale = defineModule({ name: 'sale', depends: [account], models: [] });
     const saleStock = defineModule({ name: 'sale_stock', depends: [sale, stock], models: [] });
     const saleMargin = defineModule({ name: 'sale_margin', depends: [sale], models: [] });
-    const registry = buildRegistry({ modules: [saleStock, saleMargin] });
+    const registry = buildRegistry({
+      modules: [saleStock, saleMargin],
+      security: { enforce: false },
+    });
     // Kahn's algorithm, smallest name first: after 'sale', both 'sale_margin' and 'stock' are ready.
     expect(registry.loadOrder).toEqual([
       'base',
@@ -95,7 +98,10 @@ describe('buildRegistry: load order', () => {
     const b2 = base();
     const a = defineModule({ name: 'a', depends: [b1], models: [] });
     const c = defineModule({ name: 'c', depends: [b2], models: [] });
-    const e = caught(() => buildRegistry({ modules: [a, c] }), DuplicateModuleError);
+    const e = caught(
+      () => buildRegistry({ modules: [a, c], security: { enforce: false } }),
+      DuplicateModuleError,
+    );
     expect(e.message).toContain("'base'");
   });
 
@@ -111,7 +117,10 @@ describe('buildRegistry: load order', () => {
       depends: [b],
       models: [defineModel('x.y', { fields: {} })],
     });
-    const e = caught(() => buildRegistry({ modules: [m1, m2] }), DuplicateModelError);
+    const e = caught(
+      () => buildRegistry({ modules: [m1, m2], security: { enforce: false } }),
+      DuplicateModelError,
+    );
     expect(e.message).toMatch(/m1.*m2|m2.*m1/);
   });
 });
@@ -142,7 +151,7 @@ describe('buildRegistry: cross-model checks', () => {
   });
 
   test('get() on an unknown model is a typed error', () => {
-    const registry = buildRegistry({ modules: [base()] });
+    const registry = buildRegistry({ modules: [base()], security: { enforce: false } });
     caught(() => registry.get('sale.order'), UnknownModelError);
   });
 
@@ -153,14 +162,20 @@ describe('buildRegistry: cross-model checks', () => {
       depends: [b],
       models: [defineModel('x.y', { fields: { product: f.many2one('product.product') } })],
     });
-    const e = caught(() => buildRegistry({ modules: [m] }), UnknownModelError);
+    const e = caught(
+      () => buildRegistry({ modules: [m], security: { enforce: false } }),
+      UnknownModelError,
+    );
     expect(e.message).toContain("'x.y'");
     expect(e.message).toContain("'product.product'");
   });
 
   test('the implicit fields need res.users / res.company / res.currency somewhere', () => {
     const lonely = defineModule({ name: 'lonely', models: [defineModel('x.y', { fields: {} })] });
-    const e = caught(() => buildRegistry({ modules: [lonely] }), UnknownModelError);
+    const e = caught(
+      () => buildRegistry({ modules: [lonely], security: { enforce: false } }),
+      UnknownModelError,
+    );
     expect(e.message).toContain("'res.users'");
   });
 
@@ -177,7 +192,7 @@ describe('buildRegistry: cross-model checks', () => {
       models: [defineModel('sale.margin', { fields: { picking: f.many2one('stock.picking') } })],
     });
     const e = caught(
-      () => buildRegistry({ modules: [stock, saleMargin] }),
+      () => buildRegistry({ modules: [stock, saleMargin], security: { enforce: false } }),
       UndeclaredDependencyError,
     );
     expect(e.message).toContain("'sale_margin'");
@@ -196,7 +211,10 @@ describe('buildRegistry: cross-model checks', () => {
       depends: [b],
       models: [defineModel('x.y', { fields: { items: field } })],
     });
-    const e = caught(() => buildRegistry({ modules: [m] }), InvalidRelationError);
+    const e = caught(
+      () => buildRegistry({ modules: [m], security: { enforce: false } }),
+      InvalidRelationError,
+    );
     expect(e.message).toContain("'items'");
   });
 
@@ -224,7 +242,10 @@ describe('buildRegistry: cross-model checks', () => {
         }),
       ],
     });
-    const e = caught(() => buildRegistry({ modules: [m] }), InvalidDependsPathError);
+    const e = caught(
+      () => buildRegistry({ modules: [m], security: { enforce: false } }),
+      InvalidDependsPathError,
+    );
     expect(e.message).toContain("'total'");
   });
 
@@ -248,6 +269,6 @@ describe('buildRegistry: cross-model checks', () => {
         defineModel('x.tag', { fields: { name: f.char() } }),
       ],
     });
-    expect(buildRegistry({ modules: [m] }).has('x.tag')).toBe(true);
+    expect(buildRegistry({ modules: [m], security: { enforce: false } }).has('x.tag')).toBe(true);
   });
 });

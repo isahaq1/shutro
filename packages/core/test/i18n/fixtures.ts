@@ -30,5 +30,5 @@ export const product = defineModule({
   models: [ProductTemplate],
 });
 
-export const registry = buildRegistry({ modules: [product] });
+export const registry = buildRegistry({ modules: [product], security: { enforce: false } });
 export type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;

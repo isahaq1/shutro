@@ -28,7 +28,8 @@
     "decimal.js": "^10.6.0",
     "@shutro/i18n": "workspace:*",
     "@shutro/sequence": "workspace:*",
-    "@shutro/audit": "workspace:*"
+    "@shutro/audit": "workspace:*",
+    "@shutro/security": "workspace:*"
   },
   "devDependencies": {
     "@shutro/testing": "workspace:*",

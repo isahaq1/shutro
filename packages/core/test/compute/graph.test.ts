@@ -68,7 +68,11 @@ describe('compute graph', () => {
       },
     });
     const mod = defineModule({ name: 'loop', depends: [base], models: [Loop] });
-    expect(() => buildRegistry({ modules: [mod] })).toThrow(ComputeCycleError);
-    expect(() => buildRegistry({ modules: [mod] })).toThrow(/x\.loop\.a → x\.loop\.b → x\.loop\.a/);
+    expect(() => buildRegistry({ modules: [mod], security: { enforce: false } })).toThrow(
+      ComputeCycleError,
+    );
+    expect(() => buildRegistry({ modules: [mod], security: { enforce: false } })).toThrow(
+      /x\.loop\.a → x\.loop\.b → x\.loop\.a/,
+    );
   });
 });

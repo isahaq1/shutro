@@ -13,7 +13,7 @@ import {
 } from '../../src/index.js';
 import { sale } from './fixtures.js';
 
-const registry = buildRegistry({ modules: [sale] });
+const registry = buildRegistry({ modules: [sale], security: { enforce: false } });
 type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;
 
 test('the registry type carries every model of the module tree', () => {

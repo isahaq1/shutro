@@ -3,6 +3,14 @@
  * model itself (sibling references, methods, constraints), and exposes runtime metadata for Kosh.
  * Cross-model checks (relation targets, `depends` paths, one2many inverses) belong to the registry (RFC 0002).
  */
+
+import {
+  type AccessSpec,
+  assertAccessSpec,
+  assertRuleSpec,
+  type FieldGroups,
+  type RuleSpec,
+} from '@shutro/security';
 import { isSql, type SqlFragment } from '@shutro/sql';
 import type { Env } from '../env/env.js';
 import { InvalidModelError } from '../errors.js';
@@ -210,6 +218,10 @@ export interface ModelDefinition<
   readonly constraints?: Readonly<Record<string, ConstraintSpec>>;
   /** Form-assist handlers keyed by the field they react to (RFC 0009 §7.3). */
   readonly onchange?: Readonly<Record<string, OnchangeFn>>;
+  /** Model ACL: group code → permissions (RFC 0014 §7.2). Absent groups are denied. */
+  readonly access?: AccessSpec;
+  /** Record rules (RFC 0014 §7.3). */
+  readonly rules?: Readonly<Record<string, RuleSpec>>;
 }
 
 type ModelKeys<
@@ -397,6 +409,8 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
   readonly onchange: Readonly<Record<string, OnchangeFn>>;
+  readonly access: AccessSpec;
+  readonly rules: Readonly<Record<string, RuleSpec>>;
   readonly methods: Ms;
   /** Keys of the fields the model declared itself (implicit fields excluded); extensions add to these. */
   readonly declaredFields: readonly string[];
@@ -440,7 +454,7 @@ export interface FieldDescription {
     readonly dateField: string | undefined;
   } | null;
   readonly deprecated: string | null;
-  readonly groups: readonly string[];
+  readonly groups: FieldGroups;
   readonly [extra: string]: unknown;
 }
 
@@ -477,6 +491,8 @@ export interface ModelDescription {
   readonly methods: readonly string[];
   /** Fields with an onchange handler. */
   readonly onchange: readonly string[];
+  readonly access: AccessSpec;
+  readonly rules: Readonly<Record<string, RuleSpec>>;
 }
 
 // --------------------------------------------------------------------------------------------------- helpers
@@ -932,6 +948,17 @@ export function defineModel<
     });
   }
 
+  // --- access and record rules (RFC 0014)
+  const access: AccessSpec = Object.freeze({ ...(definition.access ?? {}) });
+  assertAccessSpec(access, `Model '${name}'`);
+  const rules: Record<string, RuleSpec> = {};
+  for (const [key, rule] of Object.entries(definition.rules ?? {})) {
+    if (!FIELD_KEY.test(key))
+      fail(name, `rules key '${key}' is not camelCase.`, "Use keys like 'ownOrders'.");
+    assertRuleSpec(rule, `Model '${name}' rule '${key}'`);
+    rules[key] = Object.freeze({ ...rule });
+  }
+
   // --- onchange handlers
   const onchange: Record<string, OnchangeFn> = {};
   for (const [key, fn] of Object.entries(definition.onchange ?? {})) {
@@ -960,6 +987,8 @@ export function defineModel<
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),
     onchange: Object.freeze(onchange),
+    access,
+    rules: Object.freeze(rules),
     methods: Object.freeze(methods),
     declaredFields: Object.freeze(Object.keys(user)),
     definition: Object.freeze({ ...definition }) as unknown as ModelDefinition<
@@ -1010,7 +1039,7 @@ function describeField(
     translate: field.translate,
     sequence: field.sequence === undefined ? null : { ...field.sequence },
     deprecated: field.deprecated ?? null,
-    groups: [...field.groups],
+    groups: field.groups,
   };
   const extra: Record<string, unknown> = {};
   const x = field as unknown as Record<string, unknown>;
@@ -1029,6 +1058,7 @@ function describeField(
     'identity',
     'extensible',
     'sanitize',
+    'encrypted',
   ] as const) {
     if (x[key] !== undefined) extra[key] = x[key];
   }
@@ -1094,5 +1124,7 @@ function describeModel(model: AnyModel): ModelDescription {
     })),
     methods: Object.keys(model.methods),
     onchange: Object.keys(model.onchange),
+    access: model.access,
+    rules: model.rules,
   };
 }

@@ -151,5 +151,5 @@ export const sale = defineModule({
   models: [SaleOrderLine, SaleOrder],
 });
 
-export const registry = buildRegistry({ modules: [sale] });
+export const registry = buildRegistry({ modules: [sale], security: { enforce: false } });
 export type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;

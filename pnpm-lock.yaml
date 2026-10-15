@@ -80,6 +80,9 @@ importers:
       '@shutro/i18n':
         specifier: workspace:*
         version: link:../i18n
+      '@shutro/security':
+        specifier: workspace:*
+        version: link:../security
       '@shutro/sequence':
         specifier: workspace:*
         version: link:../sequence

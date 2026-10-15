@@ -12,15 +12,9 @@ import type { AnyModel } from '../model/model.js';
 import { targetOf } from '../registry/registry.js';
 import { trackChange, trackedKeys, trackSnapshot } from './audit.js';
 import { junctionTable } from './relations.js';
+import { assertAccess, assertFields, assertRecords, storedValue } from './security.js';
 import { fillSequences, UNNUMBERED } from './sequences.js';
-import {
-  arrayType,
-  bindValue,
-  fail,
-  normalize,
-  type TranslationContext,
-  valueRef,
-} from './values.js';
+import { arrayType, fail, normalize, type TranslationContext, valueRef } from './values.js';
 
 function translationOf(internals: ScopeInternals): TranslationContext {
   return { lang: internals.env.lang, source: internals.sourceLang };
@@ -157,6 +151,8 @@ export async function createRecords(
 ): Promise<number[]> {
   const { internals } = host;
   if (rows.length === 0) return [];
+  assertAccess(internals, model, 'create');
+  for (const row of rows) assertFields(internals, model, Object.keys(row), 'write');
   const columns = [...host.defaults(model)].filter(
     (k) => k !== 'id' && model.columns[k] !== undefined,
   );
@@ -199,7 +195,7 @@ export async function createRecords(
     const chunk = prepared.slice(i, i + CHUNK);
     const arrays = columns.map((key) =>
       sql.array(
-        chunk.map((p) => bindValue(model.fields[key] as Field, p.stored.get(key))),
+        chunk.map((p) => storedValue(internals, model.fields[key] as Field, p.stored.get(key))),
         arrayType(model.fields[key] as Field),
       ),
     );
@@ -225,6 +221,7 @@ export async function createRecords(
     internals.journal({ kind: 'created', model: model.name, id });
   });
   await host.ensureValueObjects(model, ids, new Set(columns));
+  await assertRecords(internals, model, ids, 'create'); // create rules apply to the inserted rows (RFC 0014 §7.3)
   prepared.forEach((p, i) => {
     trackSnapshot(internals, model, ids[i] as number, 'create', p.stored);
   });
@@ -257,6 +254,9 @@ export async function writeRecords(
 ): Promise<void> {
   const { internals } = host;
   if (ids.length === 0) return;
+  assertAccess(internals, model, 'write');
+  assertFields(internals, model, Object.keys(values), 'write');
+  await assertRecords(internals, model, ids, 'write');
   // Money / Quantity checks need the sibling currency / uom values; a moved record needs its old parent.
   const needed = new Set<string>();
   for (const key of Object.keys(values)) {
@@ -356,7 +356,9 @@ export async function unlinkRecords(
 ): Promise<void> {
   const { internals } = host;
   if (ids.length === 0) return;
+  assertAccess(internals, model, 'unlink');
   await internals.flush(model.name);
+  await assertRecords(internals, model, ids, 'unlink');
   // The parents of deleted children recompute (RFC 0008 §7.1): remember them before the rows go.
   const inverseKeys = [...internals.registry.compute.inverseKeys(model.name)];
   const tracked = internals.env.flags.tracking ? trackedKeys(model) : new Set<string>();
@@ -623,7 +625,7 @@ export async function flushDirty(host: WriteHost, modelName?: string): Promise<v
           sql.array(chunk, 'bigint'),
           ...fields.map((f) =>
             sql.array(
-              chunk.map((id) => bindValue(f.field, host.values(name, id)?.get(f.key))),
+              chunk.map((id) => storedValue(internals, f.field, host.values(name, id)?.get(f.key))),
               arrayType(f.field),
             ),
           ),

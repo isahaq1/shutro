@@ -42,7 +42,8 @@ export type ShutroErrorCode =
   | 'TRANSITION_GUARD'
   | 'CROSS_COMPANY'
   | 'MISSING_RATE'
-  | 'UNKNOWN_SEQUENCE';
+  | 'UNKNOWN_SEQUENCE'
+  | 'ACCESS';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -521,5 +522,31 @@ export class UnknownSequenceError extends ShutroError {
       `${where} uses the sequence '${code}', which no module declares.`,
       `Add defineSequence({ code: '${code}', ... }) to the sequences of a module the field's module depends on.`,
     );
+  }
+}
+
+/** An operation the environment may not perform (RFC 0014): model ACL, record rules or field groups. */
+export class AccessError extends ShutroError {
+  readonly model: string;
+  readonly perm: string;
+  /** The records out of scope, when the rules denied them. */
+  readonly records: readonly number[];
+  /** The restricted field, when field groups denied it. */
+  readonly field: string | undefined;
+  constructor(
+    model: string,
+    perm: string,
+    details: {
+      readonly records?: readonly number[];
+      readonly field?: string;
+      readonly problem: string;
+      readonly hint: string;
+    },
+  ) {
+    super('ACCESS', `${model}: ${details.problem}`, details.hint);
+    this.model = model;
+    this.perm = perm;
+    this.records = Object.freeze([...(details.records ?? [])]);
+    this.field = details.field;
   }
 }

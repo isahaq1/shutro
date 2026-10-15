@@ -40,6 +40,15 @@ import { isModule, type Module, type ModuleBase } from './module.js';
 
 // ------------------------------------------------------------------------------------------------- schema types
 
+import {
+  type AccessSpec,
+  type FieldGroupsInput,
+  type GroupDefinition,
+  groupClosure,
+  mergeAccess,
+  normalizeFieldGroups,
+  type RuleSpec,
+} from '@shutro/security';
 import type { SequenceDefinition } from '@shutro/sequence';
 import { buildComputeGraph, type ComputeGraph } from '../compute/graph.js';
 
@@ -125,6 +134,13 @@ export interface Registry<S = unknown> {
   readonly compute: ComputeGraph;
   /** Document sequences by code (RFC 0012 §7.1). */
   readonly sequences: ReadonlyMap<string, SequenceDefinition>;
+  /** Security groups and their closure (RFC 0014 §7.1). */
+  readonly security: {
+    readonly groups: ReadonlyMap<string, GroupDefinition>;
+    closure(codes: Iterable<string>): Set<string>;
+    /** False only when the registry was built with `security: { enforce: false }`. */
+    readonly enforce: boolean;
+  };
   has(name: string): boolean;
   /** @throws {UnknownModelError} */
   get(name: string): RegisteredModel;
@@ -138,6 +154,11 @@ export interface Registry<S = unknown> {
 export interface RegistryOptions<Mods extends readonly ModuleBase[]> {
   /** The application's modules; their dependencies are collected transitively. */
   readonly modules: Mods;
+  /**
+   * Access control (RFC 0014). Enforced by default; `enforce: false` makes every model, record and field accessible
+   * to every environment, for prototypes and for tests of other features. Never ship it off.
+   */
+  readonly security?: { readonly enforce?: boolean };
 }
 
 const RELATION_KINDS = new Set(['many2one', 'one2many', 'many2many']);
@@ -218,6 +239,8 @@ interface Draft {
   readonly methodLayers: Record<string, MethodLayer[]>;
   readonly constraints: Record<string, ConstraintSpec>;
   readonly onchange: Record<string, OnchangeFn>;
+  access: AccessSpec;
+  readonly rules: Record<string, RuleSpec>;
   readonly sqlConstraints: Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>;
   readonly indexes: IndexSpec<string>[];
   readonly tracking: string[];
@@ -240,6 +263,8 @@ function draftOf(model: AnyModel, module: string): Draft {
     methodLayers,
     constraints: { ...(def.constraints ?? {}) },
     onchange: { ...(def.onchange ?? {}) },
+    access: { ...(def.access ?? {}) },
+    rules: { ...(def.rules ?? {}) },
     sqlConstraints: { ...(def.sqlConstraints ?? {}) } as Record<
       string,
       SqlUniqueConstraint<string> | SqlCheckConstraint
@@ -326,8 +351,10 @@ function applyExtension(
         case 'index':
         case 'tracking':
         case 'copy':
-        case 'groups':
           Object.assign(changes, { [attr]: value });
+          break;
+        case 'groups':
+          Object.assign(changes, { groups: normalizeFieldGroups(value as FieldGroupsInput) });
           break;
         case 'required': {
           if (value === false && field.required) {
@@ -488,6 +515,12 @@ function applyExtension(
       conflict('constraint', key, draft.module, 'Use a different constraint key.');
     draft.constraints[key] = spec;
   }
+  draft.access = mergeAccess(draft.access, ext.access);
+  for (const [key, rule] of Object.entries(ext.rules)) {
+    if (draft.rules[key] !== undefined)
+      conflict('rule', key, draft.module, 'Use a different rule key.');
+    draft.rules[key] = rule;
+  }
   for (const [key, fn] of Object.entries(ext.onchange)) {
     if (draft.onchange[key] !== undefined)
       conflict(
@@ -522,6 +555,8 @@ function finalize(draft: Draft): RegisteredModel {
     methods: draft.methods,
     constraints: draft.constraints,
     onchange: draft.onchange,
+    access: draft.access,
+    rules: draft.rules,
     sqlConstraints: draft.sqlConstraints,
     indexes: draft.indexes,
     tracking: draft.tracking,
@@ -590,6 +625,30 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     return found;
   };
 
+  const securityGroups = new Map<string, GroupDefinition>();
+  for (const module of modules) {
+    for (const group of module.groups) {
+      if (securityGroups.has(group.code)) {
+        throw new InvalidModuleError(
+          `Module '${module.name}' declares the group '${group.code}', which another module already declares.`,
+          'Group codes are global: declare each group once.',
+        );
+      }
+      securityGroups.set(group.code, group);
+    }
+  }
+  for (const { model } of models.values()) {
+    for (const code of [
+      ...Object.keys(model.access),
+      ...Object.values(model.rules).flatMap((r) => (r.groups === 'global' ? [] : [...r.groups])),
+    ]) {
+      if (!securityGroups.has(code))
+        throw new InvalidModuleError(
+          `Model '${model.name}' grants access to the group '${code}', which no module declares.`,
+          'Declare it with defineGroup() in a module, or fix the code.',
+        );
+    }
+  }
   const sequences = new Map<string, SequenceDefinition>();
   for (const module of modules) {
     for (const definition of module.sequences) {
@@ -637,6 +696,18 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
             `${where} has checkCompany, but '${targetName}' is not companyScoped.`,
             'checkCompany compares the companies of both records: make the target companyScoped, or drop the option.',
           );
+        }
+      }
+      for (const [kind, codes] of [
+        ['read', field.groups.read],
+        ['write', field.groups.write],
+      ] as const) {
+        for (const code of codes) {
+          if (!securityGroups.has(code))
+            throw new InvalidModuleError(
+              `${where} restricts ${kind} to the group '${code}', which no module declares.`,
+              'Declare it with defineGroup() in a module the field can see, or fix the code.',
+            );
         }
       }
       if (field.sequence !== undefined) {
@@ -688,6 +759,11 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     modules: Object.freeze(modules),
     compute: buildComputeGraph(models),
     sequences,
+    security: {
+      groups: securityGroups,
+      closure: (codes) => groupClosure(securityGroups, codes),
+      enforce: options.security?.enforce ?? true,
+    },
     loadOrder: Object.freeze(modules.map((m) => m.name)),
     models,
     has: (name) => models.has(name),
