@@ -884,7 +884,7 @@ export const f = {
       {
         label: options.label,
         help: options.help,
-        tracking: options.tracking,
+        tracking: options.tracking ?? true, // state changes are audited by default (RFC 0013)
         default: options.initial,
       },
       { required: true, readonly: true },

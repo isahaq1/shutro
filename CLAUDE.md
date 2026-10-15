@@ -187,7 +187,7 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Multi-company & multi-currency (company filtering, checkCompany links, env.fx dated per-company conversion)
 - [x] Translations (JSONB) (RFC 0011: translate: true fields, env.lang reads with source fallback, SQL-side COALESCE for filters and sorts)
 - [x] Sequences (incl. gapless) (RFC 0012: module-declared sequences, range allocation per company/period, gapless in-transaction vs standard autonomous, assignNumber for posting)
-- [ ] Audit trail
+- [x] Audit trail (RFC 0013: append-only shutro_audit with trigger, tracked writes/creates/unlinks/transitions/numbering/recomputes, coalesced per transaction, records.trail())
 
 ### Phase 4 — Security
 - [ ] Model ACL, record rules, field security

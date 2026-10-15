@@ -10,6 +10,7 @@ import { MissingRecordError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { targetOf } from '../registry/registry.js';
+import { trackChange, trackedKeys, trackSnapshot } from './audit.js';
 import { junctionTable } from './relations.js';
 import { fillSequences, UNNUMBERED } from './sequences.js';
 import {
@@ -224,6 +225,9 @@ export async function createRecords(
     internals.journal({ kind: 'created', model: model.name, id });
   });
   await host.ensureValueObjects(model, ids, new Set(columns));
+  prepared.forEach((p, i) => {
+    trackSnapshot(internals, model, ids[i] as number, 'create', p.stored);
+  });
 
   // Triggers: every stored value of a new record "changed"; its own stored computes are computed at the next flush point.
   for (const key of columns) {
@@ -264,6 +268,19 @@ export async function writeRecords(
     if (field?.kind === 'many2one' && internals.registry.compute.inverseKeys(model.name).has(key))
       needed.add(key);
   }
+  // The audit trail needs the exact old values of tracked fields (RFC 0013 §7.2).
+  if (internals.env.flags.tracking) {
+    const tracked = trackedKeys(model);
+    for (const key of Object.keys(values)) {
+      if (!tracked.has(key)) continue;
+      needed.add(key);
+      const field = model.fields[key] as
+        | (Field & { currencyField?: string; uomField?: string })
+        | undefined;
+      if (field?.currencyField !== undefined) needed.add(field.currencyField);
+      if (field?.uomField !== undefined) needed.add(field.uomField);
+    }
+  }
   if (needed.size > 0) await host.fetch(model, ids, needed);
 
   const changedByKey = new Map<string, number[]>();
@@ -287,6 +304,9 @@ export async function writeRecords(
         prev: cached.get(key),
         wasDirty: internals.isDirty(model.name, id, key),
       });
+      trackChange(internals, model, id, key, cached.get(key), value, (k) =>
+        k === key ? value : (stored.get(k) ?? cached.get(k)),
+      );
       cached.set(key, value);
       internals.markDirty(model.name, id, key);
       changedByKey.set(key, [...(changedByKey.get(key) ?? []), id]);
@@ -339,7 +359,9 @@ export async function unlinkRecords(
   await internals.flush(model.name);
   // The parents of deleted children recompute (RFC 0008 §7.1): remember them before the rows go.
   const inverseKeys = [...internals.registry.compute.inverseKeys(model.name)];
-  if (inverseKeys.length > 0) await host.fetch(model, ids, new Set(inverseKeys));
+  const tracked = internals.env.flags.tracking ? trackedKeys(model) : new Set<string>();
+  const toFetch = new Set([...inverseKeys, ...tracked]);
+  if (toFetch.size > 0) await host.fetch(model, ids, toFetch);
   const parentsByKey = new Map<string, unknown[]>();
   for (const key of inverseKeys) {
     parentsByKey.set(
@@ -360,6 +382,7 @@ export async function unlinkRecords(
   }
   for (const id of ids) {
     const values = host.values(model.name, id);
+    if (values !== undefined) trackSnapshot(internals, model, id, 'unlink', values);
     internals.journal({
       kind: 'deleted',
       model: model.name,

@@ -17,6 +17,7 @@ import type { ScopeInternals } from '../env/env.js';
 import { UnknownSequenceError, ValidationError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
+import { trackChange } from './audit.js';
 import type { ComputeHost } from './compute.js';
 
 /** The placeholder of a manually numbered document (RFC 0012 §7.4). */
@@ -224,6 +225,7 @@ export async function assignNumbers(
       prev: values.get(key),
       wasDirty: internals.isDirty(model.name, id, key),
     });
+    trackChange(internals, model, id, key, values.get(key), numbers[i], (k) => values.get(k));
     values.set(key, numbers[i]);
     internals.markDirty(model.name, id, key);
   });

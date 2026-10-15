@@ -19,6 +19,7 @@ An RFC is only implemented after it has been approved and its status set to **Ac
 | 0010 | [State machines](0010-state-machines.md) | Accepted | 0001, 0002, 0008, 0009 |
 | 0011 | [Translatable fields](0011-translatable-fields.md) | Accepted | 0001, 0003, 0004, 0005 |
 | 0012 | [Sequences](0012-sequences.md) | Accepted | 0001, 0003, 0010 |
+| 0013 | [Audit trail](0013-audit-trail.md) | Accepted | 0001, 0003, 0004, 0008, 0010, 0012 |
 
 ## Lifecycle
 

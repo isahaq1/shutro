@@ -1,4 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import type { AuditRowInput } from '@shutro/audit';
 import {
   type Driver,
   type DriverConnection,
@@ -16,6 +18,7 @@ import {
   TransactionScopeError,
 } from '../errors.js';
 import { createFx, type Fx } from '../money/fx.js';
+import { trackSuperuser } from '../recordset/audit.js';
 import { invalidateCached } from '../recordset/compute.js';
 import {
   companyCurrencyId,
@@ -119,6 +122,10 @@ interface RootScope {
   /** Records to check: model → constraint key → ids (RFC 0009 §7.1). */
   readonly toCheck: Map<string, Map<string, Set<number>>>;
   readonly compute: ComputeState;
+  /** Pending audit rows of this attempt (RFC 0013 §7.2). */
+  readonly audit: AuditRowInput[];
+  /** Groups the audit rows of this attempt. */
+  readonly tx: string;
   /** Next virtual id for drafts (negative, RFC 0009 §7.4). */
   virtual: number;
   readonly uid: number;
@@ -131,6 +138,8 @@ export interface ComputeState {
   readonly computing: Set<string>;
   /** `model.key` → ids computed in the current round: invalidation and re-triggering skip them. */
   readonly protected: Map<string, Set<number>>;
+  /** `model.key` → id → the value invalidated by a trigger, for the audit row of the recompute (RFC 0013). */
+  readonly previous: Map<string, Map<number, unknown>>;
 }
 
 interface Runtime {
@@ -164,6 +173,9 @@ export interface ScopeInternals {
   cachedValues(model: string): Iterable<Map<string, unknown>>;
   readonly sourceLang: string;
   readonly driver: Driver;
+  /** Pending audit rows (RFC 0013 §7.2). */
+  readonly auditRows: AuditRowInput[];
+  readonly tx: string;
   flush(model?: string): Promise<void>;
   /** Records that `(model, key)` changed for `ids` and invalidates cached dependents (RFC 0008 §7.2). */
   trigger(model: string, key: string, ids: readonly number[]): void;
@@ -338,6 +350,7 @@ export class Env<S = unknown> {
     const parent = this.#scope;
     const root = parent.root;
     let child: Scope | undefined;
+    const auditMark = root.audit.length;
     try {
       const result = await parent.conn.savepoint(async (conn) => {
         const scope: Scope = {
@@ -371,6 +384,7 @@ export class Env<S = unknown> {
       if (child !== undefined) {
         child.status = 'rolled-back';
         if (child.journal !== undefined) undo(child.journal, root);
+        root.audit.length = auditMark; // rows of a rolled-back savepoint never reach the trail
         await runHooks(child.onRollback, this.#runtime, 'onRollback');
       }
       throw error;
@@ -428,7 +442,10 @@ export class Env<S = unknown> {
   ): Promise<T> {
     const reason = assertReason(options.reason);
     this.#assertUsable();
-    return fn(this.#derive({ su: true, reason }));
+    const su = this.#derive({ su: true, reason });
+    if (this.#runtime.registry !== undefined)
+      trackSuperuser(internalsOf(su as unknown as Env), reason);
+    return fn(su);
   }
 
   async #query<R extends Row>(query: DriverQuery): Promise<readonly R[]> {
@@ -559,6 +576,8 @@ function scopeInternals(
     cachedValues: (model) => root.cache.records.get(model)?.values() ?? [],
     sourceLang: env.sourceLang,
     driver,
+    auditRows: root.audit,
+    tx: root.tx,
     flush: (model) => flushAll(internalsOf(env), model),
     trigger(model, key, ids) {
       if (ids.length === 0) return;
@@ -739,8 +758,15 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 triggers: new Map(),
                 toCompute: new Map(),
                 toCheck: new Map(),
+                audit: [],
+                tx: randomUUID(),
                 virtual: -1,
-                compute: { recomputing: false, computing: new Set(), protected: new Map() },
+                compute: {
+                  recomputing: false,
+                  computing: new Set(),
+                  protected: new Map(),
+                  previous: new Map(),
+                },
                 uid: identity.uid,
               };
               const s: Scope = {
