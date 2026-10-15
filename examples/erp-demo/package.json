@@ -1,0 +1,19 @@
+{
+  "name": "@shutro-example/erp-demo",
+  "private": true,
+  "type": "module",
+  "description": "Partner, product, sale and invoice modules built entirely on Shutro",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@shutro/cli": "workspace:*",
+    "@shutro/core": "workspace:*",
+    "@shutro/driver-pg": "workspace:*",
+    "@shutro/migrate": "workspace:*",
+    "@shutro/sql": "workspace:*"
+  },
+  "devDependencies": {
+    "@shutro/testing": "workspace:*"
+  }
+}
