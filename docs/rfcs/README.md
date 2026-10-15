@@ -23,6 +23,7 @@ An RFC is only implemented after it has been approved and its status set to **Ac
 | 0014 | [Security](0014-security.md) | Accepted | 0001, 0003, 0004, 0005 |
 | 0015 | [Bulk operations, partitioning and benchmarks](0015-bulk-partitioning-benchmarks.md) | Accepted | 0004, 0007 |
 | 0016 | [Aggregates and amount helpers](0016-aggregates-and-amount-helpers.md) | Implemented | 0004, 0006, 0014 |
+| 0017 | [External IDs and module data](0017-external-ids-and-module-data.md) | Implemented | 0002, 0012, 0013 |
 
 ## Lifecycle
 

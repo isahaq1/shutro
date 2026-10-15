@@ -22,3 +22,7 @@ export const check: DefinitionHelpers<SchemaView>['check'] = helpers.check;
 export const onchange: DefinitionHelpers<SchemaView>['onchange'] = helpers.onchange;
 export const records: DefinitionHelpers<SchemaView>['records'] = helpers.records;
 export const method: DefinitionHelpers<SchemaView>['method'] = helpers.method;
+/** Module data (RFC 0017): records, overrides of dependencies' records, and references, typed like creates. */
+export const record: DefinitionHelpers<SchemaView>['record'] = helpers.record;
+export const override: DefinitionHelpers<SchemaView>['override'] = helpers.override;
+export const ref: DefinitionHelpers<SchemaView>['ref'] = helpers.ref;

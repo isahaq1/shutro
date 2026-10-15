@@ -51,6 +51,20 @@ export {
   type PathStep,
   type Trigger,
 } from './compute/graph.js';
+export {
+  type DataRecord,
+  type DataRef,
+  isRef,
+  override,
+  record,
+  ref,
+} from './data/data.js';
+export {
+  type DataLoadResult,
+  EXTERNAL_ID_TABLE,
+  externalIdTableStatements,
+  loadData,
+} from './data/load.js';
 export type { VerifiedIdentity } from './env/env.js';
 export {
   type BootstrapOptions,
@@ -116,6 +130,7 @@ export {
   TransactionScopeError,
   TransitionGuardError,
   UndeclaredDependencyError,
+  UnknownExternalIdError,
   UnknownModelError,
   UnknownSequenceError,
   UomMismatchError,

@@ -11,6 +11,7 @@ import {
 import type { KeyRing, Perm } from '@shutro/security';
 import { InvalidSequenceError } from '@shutro/sequence';
 import { compile, sql as sqlTag } from '@shutro/sql';
+import { refId } from '../data/load.js';
 import {
   CompanyNotAllowedError,
   ConcurrentUpdateError,
@@ -40,7 +41,7 @@ import {
   hasPermission,
 } from '../recordset/security.js';
 import { mapConstraintError } from '../recordset/sqlErrors.js';
-import type { ModelName, ModelRef } from '../recordset/types.js';
+import type { ListLoaded, ModelName, ModelRef, RecordSet } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
 import {
   assertGrants,
@@ -304,8 +305,7 @@ export class Env<S = unknown> {
       runtime.registry === undefined
         ? new Set(identity.groups)
         : runtime.registry.security.closure(identity.groups);
-    this.administrator =
-      runtime.registry?.security.isAdministrator(this.groups) === true;
+    this.administrator = runtime.registry?.security.isAdministrator(this.groups) === true;
     this.grants = new Set(identity.grants);
     this.keys = runtime.keys;
     this.tz = identity.tz;
@@ -361,6 +361,23 @@ export class Env<S = unknown> {
         assertPermission(scope, code);
       },
     };
+  }
+
+  /**
+   * The record with external id `id` (`'base.main_company'`, RFC 0017), nothing loaded.
+   * @throws {UnknownExternalIdError} for an unknown id or a record of another model.
+   */
+  async ref<M extends ModelName<S>>(
+    model: M,
+    id: string,
+  ): Promise<RecordSet<S, M, ListLoaded<never>>> {
+    const resId = await refId(this as unknown as Env, model, id);
+    return this.model(model).browse([resId]);
+  }
+
+  /** The id of the record with external id `id`. @throws {UnknownExternalIdError} */
+  async refId<M extends ModelName<S>>(model: M, id: string): Promise<Id<M>> {
+    return refId(this as unknown as Env, model, id);
   }
 
   /** Dated, per-company currency conversion (RFC 0006 §7.6). Needs a `res.currency.rate` model. */
@@ -877,6 +894,8 @@ export interface Shutro<S = unknown> {
   bootstrap<T>(options: BootstrapOptions, fn: (env: Env<S>) => Promise<T>): Promise<T>;
   /** The environment of the innermost active scope. @throws {NoEnvironmentError} outside `run()`. */
   currentEnv(): Env<S>;
+  /** The registry this instance was created with. */
+  readonly registry: Registry | undefined;
 }
 
 const defaultBackoff = (attempt: number): number =>
@@ -985,6 +1004,8 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
       };
       return execute(identity, { user: 1, company: 1 }, (env) => env.asSuperuser({ reason }, fn));
     },
+
+    registry: options.registry as Registry | undefined,
 
     currentEnv(): Env<S> {
       const scope = runtime.als.getStore();

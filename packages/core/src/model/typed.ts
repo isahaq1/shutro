@@ -18,10 +18,12 @@
  *
  * At runtime the helpers return their callbacks unchanged; only the types differ.
  */
+import { type DataRecord, override, record, ref } from '../data/data.js';
 import type { Env } from '../env/env.js';
 import type {
   ComputedKeys,
   ComputeSet,
+  CreateValues,
   DefaultLoaded,
   Draft,
   Merge,
@@ -29,8 +31,10 @@ import type {
   RecordSet,
   RelKeys,
   Target,
+  WriteValues,
 } from '../recordset/types.js';
 import type { ComputeFn } from './field.js';
+import type { Id } from './id.js';
 import type { OnchangeFn } from './model.js';
 
 type NoRels = Record<never, never>;
@@ -109,6 +113,21 @@ export interface DefinitionHelpers<S, P = PlainView<S>> {
     model: M,
     fn: (records: Records<P, M>) => unknown,
   ): (records: never) => unknown;
+  /** A data record the module ships (RFC 0017), typed like a create. */
+  record<const M extends ModelName<S> & ModelName<P>>(
+    model: M,
+    name: string,
+    values: CreateValues<P, M>,
+    options?: { readonly noupdate?: boolean },
+  ): DataRecord;
+  /** Updates a dependency's data record (`'base.main_company'`), typed like a write. */
+  override<const M extends ModelName<S> & ModelName<P>>(
+    model: M,
+    id: string,
+    values: WriteValues<P, M>,
+  ): DataRecord;
+  /** A reference to a data record: an id of `model` in data values. */
+  ref<const M extends ModelName<S>>(model: M, id: string): Id<M>;
   /**
    * A model method: `this` is the recordset it is called on, with the model's methods. Annotate the return type
    * (TypeScript must not infer it from the body, which would need the methods' own types).
@@ -141,6 +160,11 @@ export function definitions<S>(): DefinitionHelpers<S> {
       check: fn as unknown as (records: never) => unknown,
     }),
     onchange: (_model, fn) => fn as unknown as OnchangeFn,
+    record: (model, name, values, options) =>
+      record(model, name, values as Readonly<Record<string, unknown>>, options),
+    override: (model, id, values) =>
+      override(model, id, values as Readonly<Record<string, unknown>>),
+    ref: (model, id) => ref(model, id),
     records: (_model, fn) => fn as unknown as (records: never) => unknown,
     method: ((model: string, second: unknown, third?: unknown) => {
       if (typeof second === 'function') return second;
