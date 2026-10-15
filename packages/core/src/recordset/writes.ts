@@ -53,6 +53,90 @@ async function assertReferencesExist(
   }
 }
 
+/**
+ * Fills the materialized paths of new records of a hierarchical model, parents first (a batch may contain its own
+ * parents), and caches them. One statement per tree depth among the new records.
+ */
+async function fillPaths(
+  internals: ScopeInternals,
+  model: AnyModel,
+  ids: readonly number[],
+): Promise<void> {
+  const spec = model.hierarchy;
+  if (spec === undefined || ids.length === 0) return;
+  const t = sql.id(model.table);
+  const path = sql.id(model.columns[spec.path] ?? '');
+  const parent = sql.id(model.columns[spec.parent] ?? '');
+  const h = sql.id('h');
+  let pending = ids.length;
+  while (pending > 0) {
+    const rows = await internals.query<{ id: number; path: string }>(
+      compile(
+        sql`UPDATE ${t} SET ${path} = coalesce((SELECT ${h}.${path} FROM ${t} AS ${h} WHERE ${h}.${sql.id('id')} = ${t}.${parent}), '') || ${t}.${sql.id('id')}::text || '/'
+            WHERE ${t}.${sql.id('id')} = ANY(${sql.array([...ids], 'bigint')}) AND ${t}.${path} IS NULL
+              AND (${t}.${parent} IS NULL OR EXISTS (SELECT 1 FROM ${t} AS ${h} WHERE ${h}.${sql.id('id')} = ${t}.${parent} AND ${h}.${path} IS NOT NULL))
+            RETURNING ${t}.${sql.id('id')} AS ${sql.id('id')}, ${path} AS ${sql.id('path')}`,
+      ),
+    );
+    if (rows.length === 0) break;
+    for (const r of rows)
+      internals.cache.records.get(model.name)?.get(Number(r.id))?.set(spec.path, r.path);
+    pending -= rows.length;
+  }
+}
+
+/**
+ * A record of a hierarchy moved: refuses cycles, then rewrites the paths of its subtree in one statement each.
+ * @throws {ValidationError} when the new parent is the record or one of its descendants.
+ */
+async function movePaths(
+  host: WriteHost,
+  model: AnyModel,
+  ids: readonly number[],
+  newParent: unknown,
+): Promise<void> {
+  const spec = model.hierarchy;
+  if (spec === undefined) return;
+  const { internals } = host;
+  const t = sql.id(model.table);
+  const path = sql.id(model.columns[spec.path] ?? '');
+  if (typeof newParent === 'number') {
+    const [p] = await internals.query<{ path: string | null }>(
+      compile(
+        sql`SELECT ${path} AS ${sql.id('path')} FROM ${t} WHERE ${sql.id('id')} = ${newParent}`,
+      ),
+    );
+    const ancestors = new Set(
+      (p?.path ?? '')
+        .split('/')
+        .filter((x) => x !== '')
+        .map(Number),
+    );
+    const looping = ids.filter((id) => id === newParent || ancestors.has(id));
+    if (looping.length > 0)
+      fail(
+        model,
+        [spec.parent],
+        `record(s) ${looping.join(', ')} cannot move under ${newParent}: it is the record itself or one of its descendants.`,
+        'A hierarchy cannot contain cycles; choose a parent outside the subtree.',
+      );
+  }
+  await internals.flush(model.name); // the new parent column reaches the database first
+  for (const id of ids) {
+    const rows = await internals.query<{ id: number; path: string }>(
+      compile(
+        sql`WITH ${sql.id('old')} AS (SELECT ${path} AS ${sql.id('p')} FROM ${t} WHERE ${sql.id('id')} = ${id}),
+                 ${sql.id('new')} AS (SELECT coalesce((SELECT ${sql.id('h')}.${path} FROM ${t} AS ${sql.id('h')} WHERE ${sql.id('h')}.${sql.id('id')} = (SELECT ${sql.id(model.columns[spec.parent] ?? '')} FROM ${t} WHERE ${sql.id('id')} = ${id})), '') || ${String(id)} || '/' AS ${sql.id('p')})
+            UPDATE ${t} SET ${path} = (SELECT ${sql.id('p')} FROM ${sql.id('new')}) || substr(${t}.${path}, length((SELECT ${sql.id('p')} FROM ${sql.id('old')})) + 1)
+            WHERE ${t}.${path} LIKE (SELECT ${sql.id('p')} FROM ${sql.id('old')}) || '%'
+            RETURNING ${t}.${sql.id('id')} AS ${sql.id('id')}, ${path} AS ${sql.id('path')}`,
+      ),
+    );
+    for (const r of rows)
+      internals.cache.records.get(model.name)?.get(Number(r.id))?.set(spec.path, r.path);
+  }
+}
+
 /** The `created_by` / `updated_by` value: `NULL` for the system ({@link SYSTEM_UID}, bootstrap scopes). */
 function actor(internals: ScopeInternals): number | null {
   return internals.uid === SYSTEM_UID ? null : internals.uid;
@@ -267,6 +351,7 @@ export async function createRecords(
     for (const r of rowsOut) ids.push(Number(r.id));
   }
 
+  await fillPaths(internals, model, ids);
   const parentsByKey = new Map<string, unknown[]>();
   prepared.forEach((p, i) => {
     const id = ids[i] as number;
@@ -468,6 +553,8 @@ export async function writeRecords(
   }
   for (const [key, changed] of changedByKey) internals.trigger(model.name, key, changed);
   for (const [key, parents] of parentsByKey) triggerParents(internals, model, key, parents);
+  if (model.hierarchy !== undefined && model.hierarchy.parent in values)
+    await movePaths(host, model, ids, values[model.hierarchy.parent]);
   for (const key of inverses) {
     const inverse = (model.fields[key] as Field).inverse as unknown as (
       records: unknown,

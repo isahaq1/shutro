@@ -34,6 +34,8 @@ const OPERATORS = new Set([
   'isNull',
   'like',
   'ilike',
+  'childOf',
+  'parentOf',
 ]);
 
 function bind(value: unknown): unknown {
@@ -231,6 +233,10 @@ export function compileDomain(
             `Use one of: ${[...OPERATORS].join(', ')}.`,
           );
         }
+        if (op === 'childOf' || op === 'parentOf') {
+          conditions.push(hierarchyCondition(model, key, op, operand, resolve));
+          continue;
+        }
         conditions.push(condition(col, op, operand, key));
       }
     } else {
@@ -238,6 +244,52 @@ export function compileDomain(
     }
   }
   return conditions;
+}
+
+/**
+ * `childOf` / `parentOf` on `id` of a hierarchical model, or on a many2one to one: records in the subtrees of the
+ * given ids (themselves included) / their ancestors (themselves included), as prefix matches on the path column.
+ */
+function hierarchyCondition(
+  model: AnyModel,
+  key: string,
+  op: 'childOf' | 'parentOf',
+  operand: unknown,
+  resolve: ModelResolver | undefined,
+): SqlFragment {
+  const field = model.fields[key];
+  const tree =
+    key === 'id'
+      ? model
+      : field?.kind === 'many2one'
+        ? resolve?.((field as { target?: string }).target ?? '')
+        : undefined;
+  const spec = tree?.hierarchy;
+  if (tree === undefined || spec === undefined)
+    throw new InvalidDomainError(
+      `'${op}' needs a hierarchy: '${key}' of ${model.name} is not the id of, or a many2one to, a model with hierarchy.`,
+      "Declare hierarchy: { parent: 'parent', path: 'parentPath' } on the tree model.",
+    );
+  const ids = (Array.isArray(operand) ? operand : [operand]).map((v) => {
+    if (typeof v !== 'number' || !Number.isSafeInteger(v))
+      throw new InvalidDomainError(
+        `'${op}' takes ids, got ${JSON.stringify(v)}.`,
+        `E.g. { ${key}: { ${op}: [5, 9] } }.`,
+      );
+    return v;
+  });
+  const t = sql.id(tree.table);
+  const path = sql.id(tree.columns[spec.path] ?? '');
+  const h = sql.id('h');
+  const c = sql.id('c');
+  const given = sql`${h}.${sql.id('id')} = ANY(${sql.array(ids, 'bigint')})`;
+  const match = (node: SqlFragment): SqlFragment =>
+    op === 'childOf'
+      ? sql`${node}.${path} LIKE ANY (SELECT ${h}.${path} || '%' FROM ${t} AS ${h} WHERE ${given})`
+      : sql`EXISTS (SELECT 1 FROM ${t} AS ${h} WHERE ${given} AND ${h}.${path} LIKE ${node}.${path} || '%')`;
+  if (key === 'id') return match(t);
+  const col = sql.id(model.columns[key] ?? '');
+  return sql`${col} IN (SELECT ${c}.${sql.id('id')} FROM ${t} AS ${c} WHERE ${match(c)})`;
 }
 
 /**

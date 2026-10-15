@@ -75,3 +75,25 @@ one2many inverses, `depends` paths) happen when the registry loads the modules.
 Returns plain, JSON-serializable metadata for Kosh and the CLI: every field with its kind, label, column, PostgreSQL
 type, flags, selection values and transitions, plus constraints, indexes and method names. Field `tracking` is
 reported `true` when either the field or the model's `tracking` list says so.
+
+## Hierarchies
+
+```ts
+export const ProductCategory = defineModel('product.category', {
+  hierarchy: { parent: 'parent', path: 'parentPath' },
+  fields: {
+    name: f.char({ required: true }),
+    parent: f.many2one('product.category', { ondelete: 'cascade' }),
+    parentPath: f.char({ readonly: true, index: 'trigram' }), // maintained by the engine: '1/5/9/'
+  },
+});
+
+await env.model('product.product').search({ where: { category: { childOf: goodsId } } }); // the subtree
+await env.model('product.category').search({ where: { id: { parentOf: fruitId } } });     // the ancestors
+```
+
+- The engine fills the path on create (a batch may contain its own parents) and rewrites a subtree's paths in one
+  statement when a record moves. Moving a record under itself or a descendant is a `ValidationError`.
+- `childOf` / `parentOf` take an id or ids, on `id` of the tree model or on any many2one to it, and include the
+  given records. They compile to prefix matches on the path; index it with `index: 'trigram'` (a plain btree on
+  text serves prefix `LIKE` only under the C collation).
