@@ -157,6 +157,15 @@ and groups (feedback #6).
 - `backdate: { field, permission, graceDays }` on models: dates before `today - graceDays` need the permission, on
   create (including COPY and nested creates) and on writes of the field.
 
+### 7.10 Runtime security (amendment)
+
+Tables `shutro_role`, `shutro_role_access`, `shutro_role_rule`, `shutro_role_permission` hold runtime roles, model
+grants, record rules (JSON domains with `$env` placeholders) and permission grants. They extend the code's
+declarations (closure over runtime `implies`, administrator roles, ACL, rules ORed with the code's group rules,
+permissions). `env.securityAdmin` (administrators only) validates each change against the registry, compiling rule
+domains, writes it, audits it, and sends `NOTIFY shutro_security`; instances created with `runtimeSecurity: true`
+load the overlay at their first run and reload on the notification.
+
 ## 8. Type-level guarantees
 
 `access` perms and rule perms are literal unions; `env.access.can(model, perm)` takes model names of the schema;
