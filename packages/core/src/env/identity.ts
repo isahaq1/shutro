@@ -17,6 +17,11 @@ export interface Identity {
   readonly reason?: string;
   /** Security group codes of the user (RFC 0014 §7.1); implied groups are added by the registry. */
   readonly groups?: readonly string[];
+  /**
+   * Special permissions of this user on top of the roles (RFC 0014 §7.9): feature permission codes
+   * (`'account.backdate'`) and model operations (`'account.move:unlink'`).
+   */
+  readonly grants?: readonly string[];
 }
 
 /** A validated identity with defaults applied. */
@@ -28,10 +33,13 @@ export interface ResolvedIdentity {
   readonly tz: string;
   readonly reason: string | undefined;
   readonly groups: readonly string[];
+  readonly grants: readonly string[];
 }
 
 /** The acting uid of `Shutro.bootstrap` scopes: no `res.users` row, so `created_by` / `updated_by` are `NULL`. */
 export const SYSTEM_UID = 0;
+
+const GRANT = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+(:(read|write|create|unlink|export|import))?$/;
 
 const LANG = /^[a-z]{2,3}_[A-Z]{2}$/;
 
@@ -90,6 +98,16 @@ export function resolveIdentity(identity: Identity): ResolvedIdentity {
     lang: assertLang(identity.lang ?? 'en_US'),
     tz,
     reason: identity.reason === undefined ? undefined : assertReason(identity.reason),
+    grants: Object.freeze(
+      [...(identity.grants ?? [])].map((g) => {
+        if (typeof g !== 'string' || !GRANT.test(g))
+          throw new InvalidIdentityError(
+            `${JSON.stringify(g)} is not a grant.`,
+            "Grant a permission code ('account.backdate') or a model operation ('account.move:unlink').",
+          );
+        return g;
+      }),
+    ),
     groups: Object.freeze(
       [...(identity.groups ?? [])].map((g) => {
         if (typeof g !== 'string' || g === '')

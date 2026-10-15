@@ -3,10 +3,8 @@
  */
 import { defineGroup, defineModel, defineModule, f } from '@shutro/core';
 
-const all = ['read', 'write', 'create', 'unlink', 'export', 'import'] as const;
-
 export const ResUsers = defineModel('res.users', {
-  access: { 'base.user': ['read'], 'base.admin': all },
+  access: { 'base.user': ['read'] }, // administrators need no grant
   fields: {
     login: f.char({ required: true, index: 'unique' }),
     name: f.char({ required: true }),
@@ -14,7 +12,7 @@ export const ResUsers = defineModel('res.users', {
 });
 
 export const ResCurrency = defineModel('res.currency', {
-  access: { 'base.user': ['read'], 'base.admin': all },
+  access: { 'base.user': ['read'] }, // administrators need no grant
   fields: {
     name: f.char({ required: true, size: 3, index: 'unique' }),
     rounding: f.decimal({ scale: 6, required: true, default: '0.01' }),
@@ -23,7 +21,7 @@ export const ResCurrency = defineModel('res.currency', {
 });
 
 export const ResCurrencyRate = defineModel('res.currency.rate', {
-  access: { 'base.user': ['read'], 'base.admin': all },
+  access: { 'base.user': ['read'] }, // administrators need no grant
   order: ['date desc'],
   fields: {
     currency: f.many2one('res.currency', { required: true, ondelete: 'cascade' }),
@@ -35,7 +33,7 @@ export const ResCurrencyRate = defineModel('res.currency.rate', {
 });
 
 export const ResCompany = defineModel('res.company', {
-  access: { 'base.user': ['read'], 'base.admin': all },
+  access: { 'base.user': ['read'] }, // administrators need no grant
   fields: {
     name: f.char({ required: true }),
     currency: f.many2one('res.currency', { required: true }),
@@ -47,7 +45,12 @@ export const base = defineModule({
   version: '1.0.0',
   groups: [
     defineGroup({ code: 'base.user', label: 'Internal user' }),
-    defineGroup({ code: 'base.admin', label: 'Administrator', implies: ['base.user'] }),
+    defineGroup({
+      code: 'base.admin',
+      label: 'Administrator',
+      implies: ['base.user'],
+      administrator: true, // can do everything, in every module, without grants
+    }),
   ],
   models: [ResUsers, ResCurrency, ResCurrencyRate, ResCompany],
 });

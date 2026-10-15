@@ -190,6 +190,8 @@ export interface Transition<S extends string> {
   readonly message?: string;
   readonly before?: (records: never) => unknown;
   readonly after?: (records: never) => unknown;
+  /** A feature permission (`definePermission`) the user needs to run this transition (RFC 0014 §7.9). */
+  readonly requires?: string;
 }
 /** Options of `f.state`. */
 export interface StateOptions<

@@ -47,6 +47,7 @@ import {
   groupClosure,
   mergeAccess,
   normalizeFieldGroups,
+  type PermissionDefinition,
   type RuleSpec,
   SecurityDefinitionError,
 } from '@shutro/security';
@@ -139,6 +140,10 @@ export interface Registry<S = unknown> {
   readonly security: {
     readonly groups: ReadonlyMap<string, GroupDefinition>;
     closure(codes: Iterable<string>): Set<string>;
+    /** True when one of `groups` (a closure) is an administrator group (RFC 0014 §7.9). */
+    isAdministrator(groups: ReadonlySet<string>): boolean;
+    /** Feature permissions by code (RFC 0014 §7.9). */
+    readonly permissions: ReadonlyMap<string, PermissionDefinition>;
     /** False only when the registry was built with `security: { enforce: false }`. */
     readonly enforce: boolean;
     /**
@@ -660,6 +665,46 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
       securityGroups.set(group.code, group);
     }
   }
+  const permissions = new Map<string, PermissionDefinition>();
+  for (const module of modules) {
+    for (const permission of module.permissions) {
+      if (permissions.has(permission.code))
+        throw new InvalidModuleError(
+          `Module '${module.name}' declares the permission '${permission.code}', which another module already declares.`,
+          'Permission codes are global: declare each permission once.',
+        );
+      for (const code of permission.groups)
+        if (!securityGroups.has(code))
+          throw new InvalidModuleError(
+            `Permission '${permission.code}' is granted to the group '${code}', which no module declares.`,
+            'Declare it with defineGroup() in a module, or fix the code.',
+          );
+      permissions.set(permission.code, permission);
+    }
+  }
+  for (const { model } of models.values()) {
+    for (const [key, field] of Object.entries(model.fields)) {
+      const transitions = (
+        field as { transitions?: Readonly<Record<string, { requires?: string }>> }
+      ).transitions;
+      for (const [name, t] of Object.entries(transitions ?? {}))
+        if (t.requires !== undefined && !permissions.has(t.requires))
+          throw new InvalidModuleError(
+            `Transition '${name}' of ${model.name}.${key} requires the permission '${t.requires}', which no module declares.`,
+            'Declare it with definePermission() in a module, or fix the code.',
+          );
+    }
+  }
+  for (const { model } of models.values()) {
+    if (model.backdate !== undefined && !permissions.has(model.backdate.permission))
+      throw new InvalidModuleError(
+        `Model '${model.name}' requires the permission '${model.backdate.permission}' for back-dated entries, which no module declares.`,
+        'Declare it with definePermission() in a module, or fix the code.',
+      );
+  }
+  const administrators = new Set(
+    [...securityGroups.values()].filter((g) => g.administrator).map((g) => g.code),
+  );
   for (const { model } of models.values()) {
     for (const code of [
       ...Object.keys(model.access),
@@ -805,6 +850,8 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     security: {
       groups: securityGroups,
       closure: (codes) => groupClosure(securityGroups, codes),
+      isAdministrator: (groups) => [...administrators].some((code) => groups.has(code)),
+      permissions,
       enforce: mode !== 'off',
       mode,
       denied(message) {

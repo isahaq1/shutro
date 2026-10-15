@@ -14,6 +14,23 @@ export interface GroupDefinition {
   readonly code: string;
   readonly label: string;
   readonly implies: readonly string[];
+  /**
+   * Members (directly or through `implies`) are administrators: every ACL, record-rule, field-group and permission
+   * check passes for them, on every model and feature of every module, without any grant.
+   */
+  readonly administrator: boolean;
+}
+
+/**
+ * A named permission for a feature that is not a model operation: an app, a menu, a button, an approval
+ * (`'sale.discount_approve'`). Granted to groups; administrators always have it.
+ */
+export interface PermissionDefinition {
+  /** `module.name`, e.g. `'sale.discount_approve'`. */
+  readonly code: string;
+  readonly label: string;
+  /** Groups that grant it (implied groups count). */
+  readonly groups: readonly string[];
 }
 
 export const GROUP_CODE: RegExp = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
@@ -33,6 +50,8 @@ export function defineGroup(input: {
   readonly code: string;
   readonly label?: string;
   readonly implies?: readonly string[];
+  /** Members can do everything, without grants (see {@link GroupDefinition.administrator}). */
+  readonly administrator?: boolean;
 }): GroupDefinition {
   if (typeof input.code !== 'string' || !GROUP_CODE.test(input.code)) {
     throw new SecurityDefinitionError(
@@ -51,6 +70,33 @@ export function defineGroup(input: {
     code: input.code,
     label: input.label ?? input.code,
     implies: Object.freeze([...(input.implies ?? [])]),
+    administrator: input.administrator === true,
+  });
+}
+
+/** Declares a feature permission. @throws {SecurityDefinitionError} for malformed codes. */
+export function definePermission(input: {
+  readonly code: string;
+  readonly label?: string;
+  readonly groups: readonly string[];
+}): PermissionDefinition {
+  if (typeof input.code !== 'string' || !GROUP_CODE.test(input.code)) {
+    throw new SecurityDefinitionError(
+      `${JSON.stringify(input.code)} is not a permission code.`,
+      "Use 'module.name', e.g. 'sale.discount_approve'.",
+    );
+  }
+  for (const code of input.groups) {
+    if (!GROUP_CODE.test(code))
+      throw new SecurityDefinitionError(
+        `Permission '${input.code}' is granted to ${JSON.stringify(code)}, which is not a group code.`,
+        "Use 'module.name'.",
+      );
+  }
+  return Object.freeze({
+    code: input.code,
+    label: input.label ?? input.code,
+    groups: Object.freeze([...input.groups]),
   });
 }
 
