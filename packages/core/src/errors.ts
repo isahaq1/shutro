@@ -37,7 +37,9 @@ export type ShutroErrorCode =
   | 'COMPUTE_ASSIGNMENT'
   | 'RECOMPUTE_LIMIT'
   | 'CONSTRAINT'
-  | 'CONSTRAINT_VIOLATION';
+  | 'CONSTRAINT_VIOLATION'
+  | 'INVALID_TRANSITION'
+  | 'TRANSITION_GUARD';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -434,5 +436,48 @@ export class ConstraintViolationError extends ShutroError {
     this.constraint = constraint;
     this.kind = kind;
     this.fields = Object.freeze([...fields]);
+  }
+}
+
+/** A transition was requested from a state it does not start from (RFC 0010 §7.2). Nothing changed. */
+export class InvalidTransitionError extends ShutroError {
+  readonly model: string;
+  readonly transition: string;
+  /** The offending records with their current state. */
+  readonly records: readonly { readonly id: number; readonly state: string }[];
+  /** The states the transition starts from. */
+  readonly from: readonly string[];
+  constructor(
+    model: string,
+    transition: string,
+    records: readonly { readonly id: number; readonly state: string }[],
+    from: readonly string[],
+  ) {
+    super(
+      'INVALID_TRANSITION',
+      `${model}: cannot '${transition}' ${records.map((r) => `#${r.id} (${r.state})`).join(', ') || 'these records'}.`,
+      `'${transition}' starts from ${from.join(' | ') || 'no state'}. Check record.transitions() first, or leave the records out of the batch.`,
+    );
+    this.model = model;
+    this.transition = transition;
+    this.records = Object.freeze(records.map((r) => Object.freeze({ ...r })));
+    this.from = Object.freeze([...from]);
+  }
+}
+
+/** A transition guard returned records that may not transition (RFC 0010 §7.2). Nothing changed. */
+export class TransitionGuardError extends ShutroError {
+  readonly model: string;
+  readonly transition: string;
+  readonly records: readonly number[];
+  constructor(model: string, transition: string, records: readonly number[], message: string) {
+    super(
+      'TRANSITION_GUARD',
+      `${model}: ${message}`,
+      `Guard of '${transition}' failed for record(s) ${records.join(', ')}.`,
+    );
+    this.model = model;
+    this.transition = transition;
+    this.records = Object.freeze([...records]);
   }
 }

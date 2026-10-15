@@ -183,7 +183,7 @@ await shutro.run({ user, company }, async (env) => {
 ### Phase 3 — ERP engine
 - [x] Computed fields (stored / non-stored) + dependency graph (RFC 0008: triggers, rank-ordered batched recompute at flush points, non-stored on load, inverse)
 - [x] Constraints & onchange (RFC 0009: batched business constraints at flush points, SQL constraint mapping, onchange drafts)
-- [ ] State machines
+- [x] State machines (RFC 0010: generated transition methods, guards, state/transition events, statesAdd/transitionsAdd)
 - [ ] Multi-company & multi-currency
 - [ ] Translations (JSONB)
 - [ ] Sequences (incl. gapless)

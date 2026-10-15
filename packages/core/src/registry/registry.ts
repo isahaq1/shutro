@@ -13,7 +13,13 @@ import {
   UndeclaredDependencyError,
   UnknownModelError,
 } from '../errors.js';
-import { type Field, overrideField } from '../model/field.js';
+import {
+  type Field,
+  overrideField,
+  type StateHooks,
+  type StateSpec,
+  type Transition,
+} from '../model/field.js';
 import {
   type AnyModel,
   type ConstraintSpec,
@@ -21,9 +27,11 @@ import {
   type FieldDescription,
   type IndexSpec,
   type ModelDescription,
+  markTransition,
   type OnchangeFn,
   type SqlCheckConstraint,
   type SqlUniqueConstraint,
+  transitionOf,
 } from '../model/model.js';
 import type { AnyExtension, OverrideFn } from './extension.js';
 import { isModule, type Module, type ModuleBase } from './module.js';
@@ -238,10 +246,15 @@ function draftOf(model: AnyModel, module: string): Draft {
 
 /** Wraps `prev` with `layer`: `layer.call(this, next, ...args)` where `next` is `prev` bound to `this`. */
 function compose(prev: AnyFn, layer: OverrideFn): AnyFn {
-  return function composed(this: unknown, ...args: never[]): unknown {
+  const composed = function composed(this: unknown, ...args: never[]): unknown {
     const next = (...nextArgs: never[]): unknown => prev.apply(this, nextArgs);
     return layer.call(this, next as never, ...args);
   };
+  // A wrapped transition is still the transition (the rebuilt model must not regenerate it, RFC 0010 §7.1).
+  const transition = transitionOf(prev);
+  return transition === undefined
+    ? composed
+    : markTransition(composed, transition.field, transition.name);
 }
 
 function applyExtension(
@@ -359,10 +372,77 @@ function applyExtension(
           changes.selection = [...existing, ...added.map(([k, v]) => [k, v] as const)];
           break;
         }
+        case 'statesAdd':
+        case 'transitionsAdd': {
+          const stateField = field as Field & {
+            selection?: readonly (readonly [string, string])[];
+            transitions?: Readonly<Record<string, Transition<string>>>;
+            stateHooks?: Readonly<Record<string, StateHooks>>;
+            extensible?: boolean;
+          };
+          if (field.kind !== 'state') {
+            throw new InvalidExtensionError(
+              `${where}: fieldOverrides.${key}.${attr} on a ${field.kind} field.`,
+              'statesAdd / transitionsAdd apply to state fields.',
+            );
+          }
+          if (stateField.extensible !== true) {
+            throw new InvalidExtensionError(
+              `${where}: '${key}' is not an extensible state field.`,
+              'The owner must declare the field with extensible: true (RFC 0002 S6).',
+            );
+          }
+          const selection = [...(changes.selection ?? stateField.selection ?? [])];
+          const hooks: Record<string, StateHooks> = {
+            ...(changes.stateHooks ?? stateField.stateHooks ?? {}),
+          };
+          const transitions: Record<string, Transition<string>> = {
+            ...(changes.transitions ?? stateField.transitions ?? {}),
+          };
+          if (attr === 'statesAdd') {
+            for (const [s, spec] of Object.entries(value as Record<string, string | StateSpec>)) {
+              if (selection.some(([e]) => e === s))
+                throw new InvalidExtensionError(
+                  `${where}: state '${s}' already exists on '${key}'.`,
+                  'Add new states only (RFC 0002 S6).',
+                );
+              selection.push([s, typeof spec === 'string' ? spec : spec.label]);
+              if (
+                typeof spec !== 'string' &&
+                (spec.onEnter !== undefined || spec.onExit !== undefined)
+              )
+                hooks[s] = {
+                  ...(spec.onEnter === undefined ? {} : { onEnter: spec.onEnter }),
+                  ...(spec.onExit === undefined ? {} : { onExit: spec.onExit }),
+                };
+            }
+            Object.assign(changes, { selection, stateHooks: hooks });
+          } else {
+            const states = new Set(selection.map(([s]) => s));
+            for (const [tname, t] of Object.entries(value as Record<string, Transition<string>>)) {
+              if (transitions[tname] !== undefined)
+                throw new InvalidExtensionError(
+                  `${where}: transition '${tname}' already exists on '${key}'.`,
+                  'Add new transitions only; wrap existing ones with overrides (RFC 0002 S6).',
+                );
+              for (const s of [...t.from, t.to]) {
+                if (!states.has(s))
+                  throw new InvalidExtensionError(
+                    `${where}: transition '${tname}' refers to unknown state '${s}'.`,
+                    `States of '${key}': ${[...states].join(', ')} (add states with statesAdd first, in the same override).`,
+                  );
+              }
+              transitions[tname] = t;
+              draft.methodLayers[tname] = [{ module, kind: 'definition' }];
+            }
+            Object.assign(changes, { transitions });
+          }
+          break;
+        }
         default:
           throw new InvalidExtensionError(
             `${where}: fieldOverrides.${key}.${attr} is not an attribute an extension may change.`,
-            'Allowed: label, help, default, index, tracking, copy, groups, required (tighten only), selectionAdd (RFC 0002 S2–S6).',
+            'Allowed: label, help, default, index, tracking, copy, groups, required (tighten only), selectionAdd, statesAdd, transitionsAdd (RFC 0002 S2–S6).',
           );
       }
     }
