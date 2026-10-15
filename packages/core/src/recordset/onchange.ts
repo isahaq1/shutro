@@ -197,6 +197,53 @@ async function computeAll(
   }
 }
 
+/** Runs `model`'s onchange handlers on the virtual record `vid` for `changed`, cascading once per key. */
+async function runHandlers(
+  host: OnchangeHost,
+  model: AnyModel,
+  vid: number,
+  id: number | null,
+  changed: readonly string[],
+  warnings: string[],
+): Promise<void> {
+  const { internals } = host;
+  const values = host.values(model.name, vid) as Map<string, unknown>;
+  const queue = [...changed];
+  const done = new Set<string>();
+  const draft: DraftRaw = {
+    id,
+    env: internals.env,
+    get: (key) => values.get(key),
+    set(key, value) {
+      setDraftValue(model, values, key, value, translationOf(host));
+      if (!done.has(key) && !queue.includes(key)) queue.push(key);
+    },
+    async record(key) {
+      const field = model.fields[key];
+      const target = (field as { target?: string } | undefined)?.target;
+      const related = values.get(key);
+      if (field?.kind !== 'many2one' || target === undefined || typeof related !== 'number')
+        return null;
+      const set = await (
+        host.recordset(internals.registry.get(target).model, [related]) as {
+          load(): Promise<{ first(): unknown }>;
+        }
+      ).load();
+      return set.first();
+    },
+    warn: (message) => {
+      warnings.push(message);
+    },
+  };
+  while (queue.length > 0) {
+    const key = queue.shift() as string;
+    if (done.has(key)) continue;
+    done.add(key);
+    const fn = model.onchange[key] as ((draft: DraftRaw, env: unknown) => unknown) | undefined;
+    if (fn !== undefined) await fn(draft, internals.env);
+  }
+}
+
 /** `env.model(M).onchange(input)`. */
 export async function runOnchange(
   host: OnchangeHost,
@@ -232,40 +279,17 @@ export async function runOnchange(
       keys.filter((k) => values.has(k)),
     );
 
-    // Handlers, cascading once per key.
-    const queue = [...input.changed];
-    const done = new Set<string>();
-    const draft: DraftRaw = {
-      id: input.id ?? null,
-      env: internals.env,
-      get: (key) => values.get(key),
-      set(key, value) {
-        setDraftValue(model, values, key, value, translationOf(host));
-        if (!done.has(key) && !queue.includes(key)) queue.push(key);
-      },
-      async record(key) {
-        const field = model.fields[key];
-        const target = (field as { target?: string } | undefined)?.target;
-        const id = values.get(key);
-        if (field?.kind !== 'many2one' || target === undefined || typeof id !== 'number')
-          return null;
-        const set = await (
-          host.recordset(internals.registry.get(target).model, [id]) as {
-            load(): Promise<{ first(): unknown }>;
-          }
-        ).load();
-        return set.first();
-      },
-      warn: (message) => {
-        warnings.push(message);
-      },
-    };
-    while (queue.length > 0) {
-      const key = queue.shift() as string;
-      if (done.has(key)) continue;
-      done.add(key);
-      const fn = model.onchange[key] as ((draft: DraftRaw, env: unknown) => unknown) | undefined;
-      if (fn !== undefined) await fn(draft, internals.env);
+    // Handlers, cascading once per key: the draft's, then each new child row's for the fields it was given
+    // (feedback #10), so a line's product handler runs inside the order being edited and sees its values.
+    await runHandlers(host, model, vid, input.id ?? null, input.changed, warnings);
+    for (const [key, ids] of childIds) {
+      const field = model.fields[key] as Field;
+      const target = internals.registry.get((field as { target?: string }).target ?? '').model;
+      const rows = ((
+        input.values[key] as { create?: readonly Readonly<Record<string, unknown>>[] } | undefined
+      )?.create ?? []) as readonly Readonly<Record<string, unknown>>[];
+      for (const [i, cid] of ids.entries())
+        await runHandlers(host, target, cid, null, Object.keys(rows[i] ?? {}), warnings);
     }
 
     // Computes: children first, then the draft.

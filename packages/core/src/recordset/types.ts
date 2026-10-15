@@ -11,8 +11,9 @@ import type { Translations } from '@shutro/i18n';
 import type { Env } from '../env/env.js';
 import type { CreateOf, FlagsOfField, ReadValue, WriteOf, WriteType } from '../model/faces.js';
 import type { Id, X2ManyCommands } from '../model/id.js';
+import type { Currency } from '../money/currency.js';
 import type { Decimal } from '../money/decimal.js';
-import type { MoneyJson } from '../money/money.js';
+import type { Money, MoneyJson } from '../money/money.js';
 
 /** Model names of a schema view. */
 export type ModelName<S> = keyof S & string;
@@ -202,6 +203,15 @@ export interface RecordSetApi<S, M extends ModelName<S>, L> {
   filter(fn: (record: Rec<S, M, L>, index: number) => boolean): RecordSet<S, M, L>;
   /** The values of a loaded scalar field, in order. */
   mapped<K extends ScalarKeys<S, M> & SOf<L>>(key: K): ReadValue<FieldsOf<S, M>[K]>[];
+  /**
+   * Total of a loaded numeric field, `NULL`s skipped: `Money` for monetary fields (one currency, else
+   * `CurrencyMismatchError`; an empty set needs `currency`), `Decimal` for decimals, `number` for integers and floats.
+   *
+   * ```ts
+   * order.untaxed = order.lines.sum('subtotal', order.currency);
+   * ```
+   */
+  sum<K extends SummableKeys<S, M> & SOf<L>>(key: K, currency?: Currency): SumOf<FieldsOf<S, M>[K]>;
   /** Updates the records in the cache now; the database is updated at the next flush point (search, raw SQL, savepoint end, commit). */
   write(values: WriteValues<S, M>): Promise<void>;
   /** Deletes the records now (`ON DELETE` rules apply). */
@@ -225,6 +235,90 @@ export interface RecordSetApi<S, M extends ModelName<S>, L> {
   transitions(): readonly string[];
   toJSON(): readonly Id<M>[];
 }
+
+// ------------------------------------------------------------------------------------------------ aggregate
+
+/** Date buckets of {@link ModelRef.aggregate}: `'dateOrder:month'`. */
+export type Granularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
+
+type KindKeys<S, M extends ModelName<S>, Kinds> = {
+  [K in keyof FieldsOf<S, M> & string]: FieldsOf<S, M>[K] extends { readonly kind: Kinds }
+    ? K
+    : never;
+}[keyof FieldsOf<S, M> & string];
+
+/** What `aggregate()` can group by: plain fields, and dates with a granularity. */
+export type GroupKey<S, M extends ModelName<S>> =
+  | Exclude<
+      KindKeys<S, M, 'char' | 'selection' | 'state' | 'boolean' | 'integer' | 'date' | 'many2one'>,
+      TranslatedKeys<S, M>
+    >
+  | `${KindKeys<S, M, 'date' | 'datetime'>}:${Granularity}`;
+
+/** One measure of `aggregate()`: a row count, or a function of a numeric field. */
+export type Measure<S, M extends ModelName<S>> =
+  | 'count'
+  | { readonly sum: SummableKeys<S, M> }
+  | { readonly avg: SummableKeys<S, M> }
+  | { readonly min: SummableKeys<S, M> }
+  | { readonly max: SummableKeys<S, M> };
+
+/** The query of {@link ModelRef.aggregate}. */
+export interface AggregateQuery<S, M extends ModelName<S>, G extends string, Ms> {
+  readonly where?: Domain<S, M>;
+  readonly groupBy?: readonly G[];
+  readonly measures: Ms;
+  /** Group or measure names, optionally followed by `asc` / `desc`. Defaults to the groups, ascending. */
+  readonly order?: readonly (
+    | G
+    | (keyof Ms & string)
+    | `${G | (keyof Ms & string)} ${'asc' | 'desc'}`
+  )[];
+  readonly limit?: number;
+}
+
+type GroupValue<S, M extends ModelName<S>, K> = K extends `${string}:${string}`
+  ? string
+  : K extends keyof FieldsOf<S, M>
+    ? FieldsOf<S, M>[K] extends { readonly kind: 'many2one' }
+      ? Id<Target<S, M, K>> | null
+      : ReadValue<FieldsOf<S, M>[K]> | null
+    : never;
+
+type FieldOf<S, M extends ModelName<S>, K> = K extends keyof FieldsOf<S, M>
+  ? FieldsOf<S, M>[K]
+  : never;
+
+type MeasureValue<S, M extends ModelName<S>, X> = X extends 'count'
+  ? number
+  : X extends { readonly sum: infer K }
+    ? SumOf<FieldOf<S, M, K>>
+    : X extends { readonly avg: infer K }
+      ? (FieldOf<S, M, K> extends { readonly kind: 'monetary' } ? Money : Decimal) | null
+      : X extends { readonly min: infer K } | { readonly max: infer K }
+        ? SumOf<FieldOf<S, M, K>> | null
+        : never;
+
+/** A row of {@link ModelRef.aggregate}: the group values and the measures. */
+export type AggregateRow<S, M extends ModelName<S>, G extends string, Ms> = {
+  readonly [K in G]: GroupValue<S, M, K>;
+} & { readonly [K in keyof Ms]: MeasureValue<S, M, Ms[K]> };
+
+/** Fields {@link RecordSetApi.sum} accepts: integer, float, decimal and monetary. */
+export type SummableKeys<S, M extends ModelName<S>> = {
+  [K in keyof FieldsOf<S, M> & string]: FieldsOf<S, M>[K] extends {
+    readonly kind: 'integer' | 'float' | 'decimal' | 'monetary';
+  }
+    ? K
+    : never;
+}[keyof FieldsOf<S, M> & string];
+
+/** What {@link RecordSetApi.sum} returns for field `F`. */
+export type SumOf<F> = F extends { readonly kind: 'monetary' }
+  ? Money
+  : F extends { readonly kind: 'decimal' }
+    ? Decimal
+    : number;
 
 /** The model's methods (declared ones and generated transitions), callable on recordsets. */
 export type MethodsOf<S, M extends ModelName<S>> = S[M] extends { readonly methods: infer Ms }
@@ -294,8 +388,11 @@ export interface ModelRef<S, M extends ModelName<S>> {
   /** Inserts records (one statement per model) and returns them with their defaults loaded (RFC 0004 §7.6). */
   create(values: readonly CreateValues<S, M>[]): Promise<RecordSet<S, M, DefaultLoaded<S, M>>>;
   search(query?: SearchQuery<S, M>): Promise<RecordSet<S, M, DefaultLoaded<S, M>>>;
-  /** A lazy recordset of these ids. Nothing is fetched until `load()`. */
-  browse(ids: readonly number[]): PendingSet<S, M>;
+  /**
+   * The records with these ids, nothing loaded yet: `write`, `unlink` and methods work directly; `load()` fetches
+   * values (rules apply, missing ids are a `MissingRecordError`).
+   */
+  browse(ids: readonly number[]): RecordSet<S, M, ListLoaded<never>>;
   /** Form assist on an in-memory draft: derived values and warnings, nothing written (RFC 0009 §7.4). */
   onchange(input: OnchangeInput<S, M>): Promise<OnchangeResult<S, M>>;
   /**
@@ -304,6 +401,26 @@ export interface ModelRef<S, M extends ModelName<S>> {
    * permission. x2many commands are not accepted.
    */
   copy(values: readonly CreateValues<S, M>[]): Promise<RecordSet<S, M, DefaultLoaded<S, M>>>;
+  /**
+   * Grouped totals for reports (Odoo's `read_group`), in one `GROUP BY` statement with the read ACL, field groups,
+   * record rules and company scope of `search`. Monetary measures are also split by currency.
+   *
+   * ```ts
+   * const rows = await env.model('sale.order').aggregate({
+   *   where: { state: 'sale' },
+   *   groupBy: ['partner', 'dateOrder:month'],
+   *   measures: { orders: 'count', total: { sum: 'amountTotal' } },
+   *   order: ['total desc'],
+   * });
+   * rows[0].total; // Money
+   * ```
+   */
+  aggregate<
+    const G extends GroupKey<S, M> = never,
+    const Ms extends Readonly<Record<string, Measure<S, M>>> = Readonly<
+      Record<string, Measure<S, M>>
+    >,
+  >(query: AggregateQuery<S, M, G, Ms>): Promise<AggregateRow<S, M, G, Ms>[]>;
 }
 
 // ------------------------------------------------------------------------------------------------ computes

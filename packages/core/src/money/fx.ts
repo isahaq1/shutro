@@ -36,9 +36,17 @@ export interface Conversion {
 export interface PreparedRates {
   readonly date: string;
   readonly company: number;
+  /** The company's currency (the rate base). */
+  readonly companyCurrency: Currency;
+  /**
+   * A currency these rates were prepared for (or the company currency), by id: synchronous.
+   * @throws {MissingRateError} for an id that was not prepared.
+   */
+  currency(id: number): Currency;
   /** The rate of a currency relative to the company currency (units per one unit of the company currency). */
-  rate(currency: Currency): { readonly rate: Decimal; readonly date: string | null };
-  convert(money: Money, to: Currency, options?: { readonly round?: boolean }): Conversion;
+  rate(currency: Currency | number): { readonly rate: Decimal; readonly date: string | null };
+  /** Converts with the prepared rates; `to` may be a prepared currency id. */
+  convert(money: Money, to: Currency | number, options?: { readonly round?: boolean }): Conversion;
 }
 
 /** `env.fx`. */
@@ -137,9 +145,22 @@ export function createFx(host: FxHost): Fx {
       ...new Set(wanted.map((c) => c.id).filter((id): id is number => id !== undefined)),
     ];
     const rates = await lookupRates(host.internals, ids, options.date, company);
+    const byId = new Map<number, Currency>();
+    for (const c of [companyCurrency, ...wanted]) if (c.id !== undefined) byId.set(c.id, c);
+    const currencyOf = (id: number): Currency => {
+      const found = byId.get(id);
+      if (found !== undefined) return found;
+      throw new MissingRateError(
+        `Currency ${id} was not prepared for ${options.date}.`,
+        'Pass it in prepare({ currencies }), or use env.fx.convert() for a one-off conversion.',
+      );
+    };
+    const asCurrency = (c: Currency | number): Currency =>
+      typeof c === 'number' ? currencyOf(c) : c;
     const rateOf = (
-      currency: Currency,
+      wantedCurrency: Currency | number,
     ): { readonly rate: Decimal; readonly date: string | null } => {
+      const currency = asCurrency(wantedCurrency);
       if (currency.id !== undefined) {
         const found = rates.get(currency.id);
         if (found !== undefined) return found;
@@ -153,8 +174,11 @@ export function createFx(host: FxHost): Fx {
     return {
       date: options.date,
       company,
+      companyCurrency,
+      currency: currencyOf,
       rate: rateOf,
-      convert(money, to, opts = {}) {
+      convert(money, toCurrency, opts = {}) {
+        const to = asCurrency(toCurrency);
         const from = money.currency;
         if (from.code === to.code) {
           return {

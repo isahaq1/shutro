@@ -8,7 +8,12 @@ import { resolveTranslation, type Translations } from '@shutro/i18n';
 import { compile, type SqlFragment, sql } from '@shutro/sql';
 import { Decimal as DecimalJs } from 'decimal.js';
 import { type Env, internalsOf, type ScopeInternals } from '../env/env.js';
-import { FieldNotLoadedError, MissingRecordError, SingletonError } from '../errors.js';
+import {
+  FieldNotLoadedError,
+  InvalidFieldError,
+  MissingRecordError,
+  SingletonError,
+} from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { type Currency, defineCurrency } from '../money/currency.js';
@@ -17,6 +22,7 @@ import { defineUom, Quantity, type Uom } from '../money/quantity.js';
 import type { RoundingMethod } from '../money/rounding.js';
 import type { RegisteredModel, Registry } from '../registry/registry.js';
 import { targetOf } from '../registry/registry.js';
+import { type AggregateQueryRaw, runAggregate } from './aggregate.js';
 import { flushAudit, trailOf } from './audit.js';
 import {
   assignComputed,
@@ -560,6 +566,20 @@ export class RecordSetImpl {
     return [...this].map((r) => (r as unknown as Record<string, unknown>)[key]);
   }
 
+  sum(key: string, currency?: Currency): unknown {
+    const kind = this.model.fields[key]?.kind;
+    const values = this.mapped(key).filter((v) => v !== null && v !== undefined);
+    if (kind === 'monetary') return Money.sum(values as Money[], currency);
+    if (kind === 'decimal')
+      return values.reduce<DecimalJs>((total, v) => total.plus(v as DecimalJs), new DecimalJs(0));
+    if (kind === 'integer' || kind === 'float')
+      return values.reduce<number>((total, v) => total + (v as number), 0);
+    throw new InvalidFieldError(
+      `${this.model.name}.sum() needs an integer, float, decimal or monetary field; '${key}' is ${kind ?? 'not a field'}.`,
+      'Sum a numeric field, or use mapped() and reduce the values yourself.',
+    );
+  }
+
   async load(spec?: unknown): Promise<RecordSetImpl> {
     const loader = this.#loader;
     const normalized = normalizeSpec(loader, this.model, spec);
@@ -882,6 +902,29 @@ function writeHost(loader: Loader): WriteHost {
   };
 }
 
+/** True when the domain has a relation path or an x2many `any` / `none` (it reads other models' tables). */
+function followsRelations(
+  model: AnyModel,
+  where: Readonly<Record<string, unknown>> | undefined,
+): boolean {
+  for (const [key, value] of Object.entries(where ?? {})) {
+    if (key === 'or' || key === 'and') {
+      if (
+        Array.isArray(value) &&
+        value.some((d) => followsRelations(model, d as Record<string, unknown>))
+      )
+        return true;
+    } else if (key === 'not') {
+      if (followsRelations(model, value as Record<string, unknown>)) return true;
+    } else if (key.includes('.')) return true;
+    else {
+      const kind = model.fields[key]?.kind;
+      if (kind === 'one2many' || kind === 'many2many') return true;
+    }
+  }
+  return false;
+}
+
 function translationScope(internals: ScopeInternals): TranslationScope {
   return { lang: internals.env.lang, source: internals.sourceLang };
 }
@@ -943,6 +986,7 @@ export function modelRef(
   browse(ids: readonly number[]): RecordSetImpl;
   onchange(input: OnchangeInputRaw): Promise<OnchangeResultRaw>;
   copy(rows: readonly Readonly<Record<string, unknown>>[]): Promise<RecordSetImpl>;
+  aggregate(query: AggregateQueryRaw): Promise<Record<string, unknown>[]>;
 } {
   const internals = internalsOf(env);
   const registered = internals.registry.get(name);
@@ -970,7 +1014,8 @@ export function modelRef(
         (query.order ?? []).map((o) => o.split(' ')[0] ?? ''),
         'read',
       );
-      await internals.flush(model.name); // the search must see pending writes (and computes)
+      // The search must see pending writes (and computes): of every model when a relation path reaches others.
+      await internals.flush(followsRelations(model, query.where) ? undefined : model.name);
       const fields = new Set(
         readableKeys(internals, model, withSiblings(model, defaultKeys(model))),
       );
@@ -1012,5 +1057,15 @@ export function modelRef(
       const ids = await createRecords(writeHost(loader), model, rows, { copy: true });
       return new (recordClass(model))(env, registered, ids, { ids }, undefined);
     },
+    aggregate: (query) =>
+      runAggregate(
+        {
+          internals,
+          translation: translationScope(internals),
+          currency: (id) => currencyById(internals, id),
+        },
+        model,
+        query,
+      ),
   };
 }

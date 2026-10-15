@@ -150,7 +150,7 @@ Check constraints and partial indexes need the `sql` tag, so model files import 
 audited like superuser scopes.
 
 ### #9 — `PreparedRates.convert` needs `Currency` objects
-`api` · S3
+`api` · S3 · **fixed**: `PreparedRates` has `currency(id)`, `companyCurrency`, and `convert` / `rate` take ids.
 
 There is no synchronous way to get a `Currency` from an id, so the demo's company-currency total does one
 `env.fx.convert(Money.zero(...), id)` just to obtain the target currency before `prepare()`.
@@ -158,7 +158,7 @@ There is no synchronous way to get a `Currency` from an id, so the demo's compan
 **Proposal:** `prepare()` returns the currencies it loaded (`rates.currency(id)`), and `convert(money, to: Currency | number)`.
 
 ### #10 — Child onchange handlers do not run inside the parent's onchange
-`api` · S3
+`api` · S3 · **fixed**: child handlers run for the fields of each `create` row, inside the parent draft (`d.record('order')` works).
 
 `sale.order.onchange({ lines: { create: [...] } })` computes the virtual lines but does not run `sale.order.line`'s
 `product` handler, so the form calls the line onchange separately, without the order context (and without a currency,
@@ -180,7 +180,7 @@ every salesperson can read every order line. Searches cannot filter orders by `p
 rules and in RLS policies.
 
 ### #12 — Recordset helpers for amounts are missing
-`dx` · S3
+`dx` · S3 · **fixed**: `records.sum(key, currency?)` (RFC 0016).
 
 Every total compute repeats `let x = toDecimal(0); for (...) x = x.plus(l.subtotal?.amount ?? 0)`. The target API in
 `CLAUDE.md` shows `o.lines.sum('subtotal')`.
@@ -188,7 +188,7 @@ Every total compute repeats `let x = toDecimal(0); for (...) x = x.plus(l.subtot
 **Proposal:** `records.sum(key)` returning `Money` (currency-checked) or `Decimal`.
 
 ### #13 — No aggregation API for reports
-`api` `security` · S3
+`api` `security` · S3 · **fixed**: `env.model(M).aggregate()` with rules, field groups, per-currency Money (RFC 0016, `docs/guides/reports.md`).
 
 There is no `read_group` equivalent on `ModelRef`; reports drop to `env.sql`, which skips ORM rules and field groups
 (RLS covers rows only when enabled).
@@ -196,7 +196,7 @@ There is no `read_group` equivalent on `ModelRef`; reports drop to `env.sql`, wh
 **Proposal:** `env.model(M).aggregate({ groupBy, measures, where })` compiled with rules and field checks.
 
 ### #14 — `browse()` returns a pending set without write, unlink or methods
-`dx` · S4
+`dx` · S4 · **fixed**: `browse(ids)` is a full recordset: `write`, `unlink`, methods without a load.
 
 `env.model('res.partner').browse([id]).write(...)` does not type-check; every test writes `(await browse([id]).load()).write(...)`.
 

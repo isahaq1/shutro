@@ -63,6 +63,18 @@ export const SaleOrderLine = defineModel('sale.order.line', {
       },
     }),
   },
+  onchange: {
+    // Runs inside the order's onchange for new line rows (feedback #10): reads the parent draft.
+    async name(draft: unknown): Promise<void> {
+      const d = draft as Draft<S, 'sale.order.line'>;
+      const order = await d.record('order');
+      if (order !== null && d.get('currency') === null) d.set('currency', order.currency.id);
+    },
+    quantity(draft: unknown): void {
+      const d = draft as Draft<S, 'sale.order.line'>;
+      if (d.get('quantity')?.gt(100) === true) d.warn('Large quantity: check the stock.');
+    },
+  },
   constraints: {
     positiveQuantity: {
       depends: ['quantity'],
