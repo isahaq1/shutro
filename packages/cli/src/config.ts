@@ -12,6 +12,10 @@ export interface ShutroConfig {
   readonly modules: readonly string[];
   /** Directory of the application view (`.shutro/` is created inside it). Omit for a module-only package. */
   readonly app?: string;
+  /** Directory of the versioned SQL migrations (default `./migrations`). */
+  readonly migrations?: string;
+  /** PostgreSQL URL for `migrate` / `inspect --db`; `SHUTRO_DATABASE_URL` wins over it. */
+  readonly database?: string;
 }
 
 /** Identity helper that types the config file. */
@@ -25,7 +29,11 @@ function isConfig(value: unknown): value is ShutroConfig {
   return (
     Array.isArray(c.modules) &&
     c.modules.every((m) => typeof m === 'string') &&
-    (c.app === undefined || typeof c.app === 'string')
+    (c.app === undefined || typeof c.app === 'string') &&
+    ((c as { migrations?: unknown }).migrations === undefined ||
+      typeof (c as { migrations?: unknown }).migrations === 'string') &&
+    ((c as { database?: unknown }).database === undefined ||
+      typeof (c as { database?: unknown }).database === 'string')
   );
 }
 
@@ -57,6 +65,8 @@ export async function loadConfig(file: string): Promise<{ config: ShutroConfig; 
       ...(config.app === undefined
         ? {}
         : { app: isAbsolute(config.app) ? config.app : resolve(dir, config.app) }),
+      migrations: resolve(dir, config.migrations ?? './migrations'),
+      ...(config.database === undefined ? {} : { database: config.database }),
     },
   };
 }

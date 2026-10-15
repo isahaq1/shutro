@@ -68,6 +68,16 @@ importers:
       '@shutro/core':
         specifier: workspace:*
         version: link:../core
+      '@shutro/driver-pg':
+        specifier: workspace:*
+        version: link:../driver-pg
+      '@shutro/migrate':
+        specifier: workspace:*
+        version: link:../migrate
+    devDependencies:
+      '@shutro/testing':
+        specifier: workspace:*
+        version: link:../testing
 
   packages/core:
     dependencies:
