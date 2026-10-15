@@ -16,6 +16,12 @@ import { junctionTable } from './relations.js';
 /** Resolves a model by name (the registry), needed for relation paths. */
 export type ModelResolver = (name: string) => AnyModel;
 
+/**
+ * Extra conditions on a path's target, ANDed inside its sub-select: user searches pass the target's read rules so a
+ * path cannot reveal records the user cannot read. Rules themselves compile without one.
+ */
+export type TargetScope = (target: AnyModel) => SqlFragment[];
+
 const OPERATORS = new Set([
   'eq',
   'ne',
@@ -139,6 +145,7 @@ export function compileDomain(
   where: Readonly<Record<string, unknown>> | undefined,
   translation?: TranslationScope,
   resolve?: ModelResolver,
+  scope?: TargetScope,
 ): SqlFragment[] {
   const conditions: SqlFragment[] = [];
   for (const [key, value] of Object.entries(where ?? {})) {
@@ -150,7 +157,13 @@ export function compileDomain(
           "Use { or: [{ state: 'draft' }, { user: 7 }] }.",
         );
       const parts = value.map((d) => {
-        const inner = compileDomain(model, d as Record<string, unknown>, translation, resolve);
+        const inner = compileDomain(
+          model,
+          d as Record<string, unknown>,
+          translation,
+          resolve,
+          scope,
+        );
         return inner.length === 0 ? sql`TRUE` : sql`(${sql.join(inner, sql` AND `)})`;
       });
       if (parts.length > 0)
@@ -158,7 +171,13 @@ export function compileDomain(
       continue;
     }
     if (key === 'not') {
-      const inner = compileDomain(model, value as Record<string, unknown>, translation, resolve);
+      const inner = compileDomain(
+        model,
+        value as Record<string, unknown>,
+        translation,
+        resolve,
+        scope,
+      );
       if (inner.length > 0) conditions.push(sql`NOT (${sql.join(inner, sql` AND `)})`);
       continue;
     }
@@ -173,6 +192,7 @@ export function compileDomain(
           'any',
           translation,
           resolve,
+          scope,
         ),
       );
       continue;
@@ -188,7 +208,15 @@ export function compileDomain(
         const inner = value[mode];
         if (inner !== undefined)
           conditions.push(
-            relation(model, key, inner as Record<string, unknown>, mode, translation, resolve),
+            relation(
+              model,
+              key,
+              inner as Record<string, unknown>,
+              mode,
+              translation,
+              resolve,
+              scope,
+            ),
           );
       }
       continue;
@@ -223,6 +251,7 @@ function relation(
   mode: 'any' | 'none',
   translation: TranslationScope | undefined,
   resolve: ModelResolver | undefined,
+  scope: TargetScope | undefined,
 ): SqlFragment {
   const field = model.fields[key];
   const targetName = (field as { target?: string } | undefined)?.target;
@@ -239,7 +268,10 @@ function relation(
     );
   }
   const target = resolve(targetName);
-  const conditions = compileDomain(target, inner, translation, resolve);
+  const conditions = [
+    ...compileDomain(target, inner, translation, resolve, scope),
+    ...(scope?.(target) ?? []),
+  ];
   const where =
     conditions.length === 0 ? sql.empty : sql` WHERE ${sql.join(conditions, sql` AND `)}`;
   const targets = sql`SELECT ${sql.id('id')} FROM ${sql.id(target.table)}${where}`;

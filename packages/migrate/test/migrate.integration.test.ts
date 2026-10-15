@@ -61,6 +61,13 @@ function saleRegistry(
           priority: f.integer({ required: true, default: 1 }),
           tags: f.many2many('sale.tag'),
           reference: f.char({ index: 'unique' }),
+          // Literal defaults become SQL DEFAULTs (feedback #3); the plan after applying must be empty.
+          origin: f.char({ required: true, default: "O'Neil" }),
+          kind: f.selection({ goods: 'Goods', service: 'Service' }, { default: 'goods' }),
+          rate: f.decimal({ scale: 4, default: '1.50' }),
+          ratio: f.float({ default: 0.5 }),
+          validFrom: f.date({ default: '2026-01-01' }),
+          shift: f.integer({ default: -1 }),
         }
       : {}),
     ...(version >= 3 ? { note: f.text() } : {}),
@@ -174,6 +181,13 @@ describe('plan, write, apply', () => {
       nullable: false,
       default: '1',
     });
+    const columns = live.tables['sale_order']?.columns;
+    expect(columns?.['origin']?.default).toBe("'O''Neil'");
+    expect(columns?.['kind']?.default).toBe("'goods'");
+    expect(columns?.['rate']?.default).toBe('1.50');
+    expect(columns?.['ratio']?.default).toBe('0.5');
+    expect(columns?.['valid_from']?.default).toBe("'2026-01-01'");
+    expect(columns?.['shift']?.default).toBeNull(); // negative: stays in the ORM
     expect(live.tables['sale_order_sale_tag_rel']?.primaryKey).toEqual([
       'sale_order_id',
       'sale_tag_id',

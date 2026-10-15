@@ -2,7 +2,14 @@
  * The intended database schema, derived from a registry (RFC 0001 §7.5 naming, RFC 0002 origins). The same shape
  * describes the live schema read from `pg_catalog`, so the two can be diffed directly.
  */
-import { type Field, junctionTable, type Registry, snakeCase, targetOf } from '@shutro/core';
+import {
+  columnDefault,
+  type Field,
+  junctionTable,
+  type Registry,
+  snakeCase,
+  targetOf,
+} from '@shutro/core';
 import { compile, type SqlFragment } from '@shutro/sql';
 import { MigrationError } from './errors.js';
 
@@ -100,12 +107,7 @@ function columnOf(key: string, field: Field, column: string): ColumnSpec {
       backfill: null,
     };
   const type = field.kind === 'many2one' ? 'bigint' : canonicalType(field.pgType);
-  let dbDefault: string | null = null;
-  if (key === 'createdAt' || key === 'updatedAt') dbDefault = 'now()';
-  else if (field.kind === 'boolean' && typeof field.default === 'boolean')
-    dbDefault = field.default ? 'true' : 'false';
-  else if (field.kind === 'integer' && typeof field.default === 'number')
-    dbDefault = String(field.default);
+  const dbDefault = columnDefault(key, field);
   const backfill = typeof field.default === 'function' ? null : literalOf(field.default);
   return {
     name: column,

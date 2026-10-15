@@ -46,7 +46,11 @@ const Company = defineModel('res.company', {
 });
 const Partner = defineModel('res.partner', {
   access: { 'base.user': ['read', 'create'] },
-  fields: { name: f.char({ required: true }), secret: f.char({ groups: ['base.admin'] }) },
+  fields: {
+    name: f.char({ required: true }),
+    secret: f.char({ groups: ['base.admin'] }),
+    orders: f.one2many('sale.order', 'partner'),
+  },
 });
 const Tag = defineModel('sale.tag', {
   access: { 'base.user': ['read', 'create'] },
@@ -215,6 +219,26 @@ describe('relation paths in domains', () => {
       },
       ['base.admin'],
     );
+  });
+});
+
+describe("paths respect the target's record rules", () => {
+  test('a path cannot reveal records the user cannot read', async () => {
+    await as(1, async (env) => {
+      const partners = env.model('res.partner');
+      expect((await partners.search({ where: { orders: { any: { name: 'B' } } } })).ids).toEqual(
+        [],
+      ); // Bob's order
+      expect((await partners.search({ where: { orders: { any: { name: 'A' } } } })).ids).toEqual([
+        ids.acme,
+      ]);
+      expect((await partners.search({ where: { 'orders.name': 'B' } })).ids).toEqual([]);
+    });
+    await as(2, async (env) => {
+      expect(
+        (await env.model('res.partner').search({ where: { orders: { any: { name: 'B' } } } })).ids,
+      ).toEqual([ids.globex]);
+    });
   });
 });
 

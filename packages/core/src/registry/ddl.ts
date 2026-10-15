@@ -29,6 +29,38 @@ function typeName(field: Field, model: string, key: string): string {
   return field.pgType;
 }
 
+const NUMBER = /^-?\d+(\.\d+)?$/;
+const LITERAL_KINDS = new Set(['char', 'text', 'html', 'selection', 'state', 'date']);
+const NUMERIC_KINDS = new Set(['integer', 'float', 'decimal']);
+
+/**
+ * The database-level `DEFAULT` of a column (feedback #3), in the form PostgreSQL's catalog shows it once casts are
+ * stripped, so the migrator's diff is stable: `true` / `false`, unquoted non-negative numbers, quoted strings,
+ * `now()` for the timestamps. `null` when the default is a function, the field is translated, encrypted, numbered,
+ * computed, or a relation: those stay in the ORM.
+ */
+export function columnDefault(key: string, field: Field): string | null {
+  if (key === 'createdAt' || key === 'updatedAt') return 'now()';
+  const value: unknown = field.default;
+  if (value === undefined || value === null || typeof value === 'function') return null;
+  if (field.translate || field.encrypted || field.sequence !== undefined || field.computed)
+    return null;
+  if (field.kind === 'boolean') return typeof value === 'boolean' ? String(value) : null;
+  if (NUMERIC_KINDS.has(field.kind)) {
+    const text =
+      typeof value === 'number' && Number.isFinite(value)
+        ? String(value)
+        : typeof value === 'string'
+          ? value
+          : null;
+    // Negative constants come back as `'-1'::integer`: keep them in the ORM rather than fight the catalog.
+    return text !== null && NUMBER.test(text) && !text.startsWith('-') ? text : null;
+  }
+  if (LITERAL_KINDS.has(field.kind) && typeof value === 'string')
+    return `'${value.replaceAll("'", "''")}'`;
+  return null;
+}
+
 function columnDdl(model: AnyModel, key: string, field: Field, column: string): string {
   const parts = [ident(column)];
   if (key === 'id') {
@@ -42,11 +74,8 @@ function columnDdl(model: AnyModel, key: string, field: Field, column: string): 
   }
   parts.push(typeName(field, model.name, key));
   if (field.required && !field.computed) parts.push('NOT NULL'); // stored computes are filled after insert (RFC 0008 §7.6)
-  if (field.kind === 'boolean' && typeof field.default === 'boolean')
-    parts.push(`DEFAULT ${field.default ? 'TRUE' : 'FALSE'}`);
-  if (field.kind === 'integer' && typeof field.default === 'number')
-    parts.push(`DEFAULT ${field.default}`);
-  if (key === 'createdAt' || key === 'updatedAt') parts.push('DEFAULT now()');
+  const dbDefault = columnDefault(key, field);
+  if (dbDefault !== null) parts.push(`DEFAULT ${dbDefault}`);
   return parts.join(' ');
 }
 
