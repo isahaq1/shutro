@@ -101,7 +101,21 @@ importers:
 
   packages/i18n: {}
 
-  packages/migrate: {}
+  packages/migrate:
+    dependencies:
+      '@shutro/core':
+        specifier: workspace:*
+        version: link:../core
+      '@shutro/driver-pg':
+        specifier: workspace:*
+        version: link:../driver-pg
+      '@shutro/sql':
+        specifier: workspace:*
+        version: link:../sql
+    devDependencies:
+      '@shutro/testing':
+        specifier: workspace:*
+        version: link:../testing
 
   packages/security: {}
 

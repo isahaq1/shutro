@@ -21,5 +21,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@shutro/core": "workspace:*",
+    "@shutro/driver-pg": "workspace:*",
+    "@shutro/sql": "workspace:*"
+  },
+  "devDependencies": {
+    "@shutro/testing": "workspace:*"
   }
 }

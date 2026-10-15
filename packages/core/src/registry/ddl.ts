@@ -39,6 +39,8 @@ function columnDdl(model: AnyModel, key: string, field: Field, column: string): 
   if (field.required) parts.push('NOT NULL');
   if (field.kind === 'boolean' && typeof field.default === 'boolean')
     parts.push(`DEFAULT ${field.default ? 'TRUE' : 'FALSE'}`);
+  if (field.kind === 'integer' && typeof field.default === 'number')
+    parts.push(`DEFAULT ${field.default}`);
   if (key === 'createdAt' || key === 'updatedAt') parts.push('DEFAULT now()');
   return parts.join(' ');
 }

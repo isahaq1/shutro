@@ -94,6 +94,11 @@ Code compiled against a module's view must keep working after other modules are 
 touched it, and `methodLayers` (definition, overrides and replacements per method). `registry.explain('sale.order',
 'confirm')` returns the layers of one method, innermost first, which is what `shutro inspect` will print.
 
+## Versions and data migrations
+
+A module's `version` is recorded in the database by `@shutro/migrate`; raising it runs the module's `migrations` hooks
+on upgrade. See the [migrations guide](./migrations.md).
+
 ## Not yet
 
 Mixins, module-contributed flags, and the generated per-module type views (`shutro generate`) are still to come.

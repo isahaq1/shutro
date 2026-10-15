@@ -670,3 +670,24 @@ Resolved on 2026-10-14. The original questions are kept below for context.
    its module doesn't depend on is an `UndeclaredDependencyError` even though the base model's owner might depend on it.
 6. **Not yet:** mixins (`defineMixin`), module `flags` and `precisions`, `replace()` warnings at build time in dev mode,
    and the generator.
+
+## Implementation notes (2026-10-15, migrations)
+
+`packages/migrate` and `defineModule({ migrations })`. Where the implementation settles what this RFC deferred:
+
+1. **Open question 2 is answered: the migrate package stores module state.** `shutro_module (name, version)` records
+   the installed version of every module; `shutro_migration (version, name, checksum, applied_at)` is the ledger of
+   applied schema files. No `ir_module_module`-style model: module state is not business data.
+2. **Hooks are module manifest entries**, `migrations: [{ version, up(ctx) }]`, validated at `defineModule` (semver
+   shape, not beyond the module version) and sorted. They run only on upgrade, for `installed < version <= module.version`,
+   in registry load order, one transaction per module. A fresh install records the version and runs nothing.
+3. **`MigrationContext` is `{ sql, registry }`**, no `Env`: migrations bypass business logic by design (see the
+   [migrations guide](../guides/migrations.md)).
+4. **Schema migrations are files, not live DDL.** `planMigration` diffs the live `pg_catalog` against
+   `desiredSchema(registry)`; `writeMigrationFile` emits `NNNN_name.sql`; `applyMigrations` runs pending files in order
+   and refuses destructive statements without `allowDestructive`. S1's defaults become the backfill when a column turns
+   required (§7.3). Check constraints and partial-index predicates must be parameter-free `sql` fragments.
+5. **`createTableStatements` in core stays** as the test stopgap; the migrator's plan over a stopgap-created schema
+   contains only the indexes the stopgap doesn't create, which is asserted in the integration tests.
+6. **Not here:** data files / seed data (§12), renames (a drop plus an add in the diff: write the `RENAME` by hand), and
+   the CLI entry points (`shutro migrate plan|write|apply`) which come with the CLI package.
