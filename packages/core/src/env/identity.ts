@@ -53,6 +53,20 @@ function assertId(value: unknown, what: string): number {
   return value;
 }
 
+/** Validates special grants (`'account.backdate'`, `'account.move:unlink'`). @throws {InvalidIdentityError} */
+export function assertGrants(grants: readonly unknown[]): readonly string[] {
+  return Object.freeze(
+    grants.map((g) => {
+      if (typeof g !== 'string' || !GRANT.test(g))
+        throw new InvalidIdentityError(
+          `${JSON.stringify(g)} is not a grant.`,
+          "Grant a permission code ('account.backdate') or a model operation ('account.move:unlink').",
+        );
+      return g;
+    }),
+  );
+}
+
 /** Validates a language code (`'en_US'`, `'bn_BD'`). @throws {InvalidIdentityError} */
 export function assertLang(lang: string): string {
   if (!LANG.test(lang)) {

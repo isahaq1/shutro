@@ -117,6 +117,19 @@ export interface DefinitionHelpers<S, P = PlainView<S>> {
     model: M,
     fn: (this: Records<S, M>, ...args: A) => R,
   ): (this: unknown, ...args: A) => R;
+  /**
+   * A model method that runs with extra grants (RFC 0014 §7.9): what it touches beyond the caller's rights is
+   * declared here, and each call is audited (`elevate`). `reason` defaults to `'<model>.<method>'`.
+   *
+   * ```ts
+   * createInvoices: method('sale.order', { elevate: ['sale.order.line:read'] }, async function (): Promise<...> { ... }),
+   * ```
+   */
+  method<const M extends ModelName<S>, A extends unknown[], R>(
+    model: M,
+    options: { readonly elevate: readonly string[]; readonly reason?: string },
+    fn: (this: Records<S, M>, ...args: A) => Promise<R>,
+  ): (this: unknown, ...args: A) => Promise<R>;
 }
 
 /** Helpers that type definition callbacks against a schema view (normally the generated one). */
@@ -129,7 +142,21 @@ export function definitions<S>(): DefinitionHelpers<S> {
     }),
     onchange: (_model, fn) => fn as unknown as OnchangeFn,
     records: (_model, fn) => fn as unknown as (records: never) => unknown,
-    method: <A extends unknown[], R>(_model: unknown, fn: (this: never, ...args: A) => R) =>
-      fn as unknown as (this: unknown, ...args: A) => R,
+    method: ((model: string, second: unknown, third?: unknown) => {
+      if (typeof second === 'function') return second;
+      const { elevate, reason } = second as { elevate: readonly string[]; reason?: string };
+      const fn = third as (this: unknown, ...args: unknown[]) => Promise<unknown>;
+      return async function (this: unknown, ...args: unknown[]): Promise<unknown> {
+        const records = this as { readonly env: Env<S>; readonly ids: readonly number[] };
+        return records.env.withGrants(
+          { grants: elevate, reason: reason ?? `${model}.${fn.name || 'method'}` },
+          (env) =>
+            fn.call(
+              (env as unknown as Env<Record<string, unknown>>).model(model).browse(records.ids),
+              ...args,
+            ),
+        );
+      };
+    }) as DefinitionHelpers<S>['method'],
   };
 }

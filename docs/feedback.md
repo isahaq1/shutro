@@ -140,7 +140,7 @@ Check constraints and partial indexes need the `sql` tag, so model files import 
 **Proposal:** re-export `sql` from `@shutro/core`.
 
 ### #8 — Methods need ACL grants on every model they touch
-`security` `api` · S3
+`security` `api` · S3 · **fixed**: `method(model, { elevate, reason }, fn)` and `env.withGrants()`, audited as `elevate` (the demo dropped its grant-only extension).
 
 `sale.order.createInvoices()` run by an accountant reads order lines, so `invoice` must grant `account.user` read on
 `sale.order.line` (an extension that exists only for that). Odoo uses `sudo()` inside such methods; Shutro's

@@ -97,6 +97,19 @@ createShutro({ driver, registry, identity: async (uid) => ({ companies, groups, 
 Unknown permission codes are definition errors (a misspelled `requires` fails at `buildRegistry`, a misspelled
 `env.access.has()` throws).
 
+## Elevated methods and `withGrants`
+
+A method that must touch something its callers cannot (an accountant invoicing reads order lines) declares exactly
+that, instead of granting the whole role or using a superuser scope:
+
+```ts
+createInvoices: method('sale.order', { elevate: ['sale.order.line:read'], reason: 'invoice confirmed orders' },
+  async function (): Promise<readonly Id<'account.move'>[]> { /* this.load({ lines: [...] }) works */ }),
+```
+
+Each call writes an `elevate` audit row (reason, grants). The grants exist only inside the call; record rules, field
+groups and company scoping still apply. `env.withGrants({ grants, reason }, fn)` is the same thing for any code.
+
 ## Back-dated entries
 
 ```ts
