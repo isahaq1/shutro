@@ -55,6 +55,30 @@ export const SaleOrder = defineModel('sale.order', {
 - **Superuser**: `env.asSuperuser({ reason }, fn)` skips all three for `fn` (audited, RFC 0013). The engine's own
   loads (computes, constraints, audit snapshots) carry no rules; what the user *sees* is governed at the boundary.
 
+## Development mode: `enforce: 'warn'`
+
+```ts
+const registry = buildRegistry({ modules, security: { enforce: 'warn' } }); // never in production
+```
+
+A missing ACL or field-group grant is reported once (`process.emitWarning`, code `SHUTRO_ACCESS_WOULD_DENY`, or
+your `onDenied`) and allowed, so a prototype runs before its `access` declarations exist. Record rules still apply.
+`buildRegistry` refuses `'warn'` when `NODE_ENV=production`.
+
+## Installing a database: `bootstrap`
+
+```ts
+await shutro.bootstrap({ reason: 'install' }, async (env) => {
+  const bdt = (await env.model('res.currency').create([{ name: 'BDT' }])).first();
+  await env.model('res.company').create([{ name: 'Acme', currency: bdt.id }]);
+  await env.model('res.users').create([{ login: 'admin' }]);
+});
+```
+
+`bootstrap` acts as the system (`SYSTEM_UID`, 0) in an audited superuser scope: no `res.users` row is needed, and
+`created_by` / `updated_by` are `NULL`. Pass `company` once the first company exists so company-scoped defaults
+have a value. Everything after installation runs through `shutro.run` as real users.
+
 ## Verified identities
 
 `shutro.run` trusts its caller unless `createShutro` gets an `identity` loader:

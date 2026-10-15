@@ -43,6 +43,8 @@ export interface DriverConnection {
 
 /** The connection pool. */
 export interface Driver {
+  /** Pool size (`max`), when known: Shutro checks it against features that need a second connection. */
+  readonly max?: number;
   /** Runs one statement in its own implicit transaction (DDL, maintenance). Business code uses `transaction()`. */
   query<R extends Row = Row>(query: DriverQuery): Promise<readonly R[]>;
   /**
@@ -245,6 +247,7 @@ export function createDriver(options: DriverOptions): Driver {
   });
 
   return {
+    max: options.max ?? 10,
     query: (query) => run(sql, query),
 
     async transaction<T>(

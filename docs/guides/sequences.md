@@ -40,3 +40,9 @@ state: f.state({ ..., transitions: { post: { from: ['draft'], to: 'posted', befo
 Build-time checks: a field's sequence code must be declared by a module the field's module can see
 (`UnknownSequenceError`), codes are unique across modules, a field's `gapless` must agree with the definition, and
 `dateField` must be a field of the model.
+
+## Pool size
+
+Standard (non-gapless) sequences allocate in a short transaction of their own, on a second connection. With a pool
+of one (`createDriver({ max: 1 })`) that would wait forever, so `createShutro` refuses it with an
+`InvalidSequenceError` naming the sequences. Raise `max`, or make them `gapless: true`.

@@ -6,6 +6,7 @@
 
 import { compile, type SqlFragment, sql } from '@shutro/sql';
 import type { ScopeInternals } from '../env/env.js';
+import { SYSTEM_UID } from '../env/identity.js';
 import { MissingRecordError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
@@ -15,6 +16,11 @@ import { junctionTable } from './relations.js';
 import { assertAccess, assertFields, assertRecords, storedValue } from './security.js';
 import { fillSequences, UNNUMBERED } from './sequences.js';
 import { arrayType, fail, normalize, type TranslationContext, valueRef } from './values.js';
+
+/** The `created_by` / `updated_by` value: `NULL` for the system ({@link SYSTEM_UID}, bootstrap scopes). */
+function actor(internals: ScopeInternals): number | null {
+  return internals.uid === SYSTEM_UID ? null : internals.uid;
+}
 
 function translationOf(internals: ScopeInternals): TranslationContext {
   return { lang: internals.env.lang, source: internals.sourceLang };
@@ -169,7 +175,7 @@ export async function createRecords(
       if (field === undefined) continue;
       let value: unknown;
       if (key === 'createdAt' || key === 'updatedAt') value = internals.now;
-      else if (key === 'createdBy' || key === 'updatedBy') value = internals.uid;
+      else if (key === 'createdBy' || key === 'updatedBy') value = actor(internals);
       else value = defaultOf(field, internals.env) ?? null;
       // Stored computes are filled after the insert (RFC 0008 §7.6); sequences before it (RFC 0012 §7.4).
       if (value === null && field.sequence?.on === 'manual' && field.required) value = UNNUMBERED;
@@ -722,7 +728,7 @@ export async function flushDirty(host: WriteHost, modelName?: string): Promise<v
         const sets = [
           ...fields.map((f) => sql`${sql.id(f.column)} = ${valueRef(f.field, f.column)}`),
           sql`${sql.id('updated_at')} = ${internals.now}`,
-          sql`${sql.id('updated_by_id')} = ${internals.uid}`,
+          sql`${sql.id('updated_by_id')} = ${actor(internals)}`,
         ];
         const rows = await internals.query<{ id: number }>(
           compile(
@@ -735,7 +741,7 @@ export async function flushDirty(host: WriteHost, modelName?: string): Promise<v
         for (const id of chunk) {
           const values = host.values(name, id);
           values?.set('updatedAt', internals.now);
-          values?.set('updatedBy', internals.uid);
+          values?.set('updatedBy', actor(internals));
         }
       }
     }

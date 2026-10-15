@@ -48,6 +48,7 @@ import {
   mergeAccess,
   normalizeFieldGroups,
   type RuleSpec,
+  SecurityDefinitionError,
 } from '@shutro/security';
 import type { SequenceDefinition } from '@shutro/sequence';
 import { buildComputeGraph, type ComputeGraph } from '../compute/graph.js';
@@ -140,6 +141,13 @@ export interface Registry<S = unknown> {
     closure(codes: Iterable<string>): Set<string>;
     /** False only when the registry was built with `security: { enforce: false }`. */
     readonly enforce: boolean;
+    /**
+     * `'warn'`: ACL and field-group denials are reported through {@link SecurityOptions.onDenied} and allowed
+     * (record rules still apply). `'enforce'` otherwise (or `'off'` with `enforce: false`).
+     */
+    readonly mode: 'enforce' | 'warn' | 'off';
+    /** Reports a denial `'warn'` mode let through; each distinct message once per registry. */
+    denied(message: string): void;
   };
   has(name: string): boolean;
   /** @throws {UnknownModelError} */
@@ -158,7 +166,19 @@ export interface RegistryOptions<Mods extends readonly ModuleBase[]> {
    * Access control (RFC 0014). Enforced by default; `enforce: false` makes every model, record and field accessible
    * to every environment, for prototypes and for tests of other features. Never ship it off.
    */
-  readonly security?: { readonly enforce?: boolean };
+  readonly security?: SecurityOptions;
+}
+
+/** Access-control options of {@link buildRegistry}. */
+export interface SecurityOptions {
+  /**
+   * `true` (default) enforces ACL, rules and field groups. `'warn'` is for development: a missing grant is reported
+   * and allowed, so prototypes run before their `access` declarations are written; it is refused when
+   * `NODE_ENV=production`. `false` turns access control off (tests of other features).
+   */
+  readonly enforce?: boolean | 'warn';
+  /** Where `'warn'` reports go. Defaults to `process.emitWarning` (code `SHUTRO_ACCESS_WOULD_DENY`). */
+  readonly onDenied?: (message: string) => void;
 }
 
 const RELATION_KINDS = new Set(['many2one', 'one2many', 'many2many']);
@@ -764,6 +784,20 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     }
   }
 
+  const enforce = options.security?.enforce ?? true;
+  const mode = enforce === 'warn' ? 'warn' : enforce ? 'enforce' : 'off';
+  if (mode === 'warn' && process.env['NODE_ENV'] === 'production') {
+    throw new SecurityDefinitionError(
+      "security: { enforce: 'warn' } is refused when NODE_ENV=production.",
+      "Declare the missing access grants (the warnings name them) and remove enforce: 'warn'.",
+    );
+  }
+  const reported = new Set<string>();
+  const onDenied =
+    options.security?.onDenied ??
+    ((message: string): void => {
+      process.emitWarning(message, { code: 'SHUTRO_ACCESS_WOULD_DENY' });
+    });
   const registry: Registry<Simplify<SchemaOfModules<Mods>>> = {
     modules: Object.freeze(modules),
     compute: buildComputeGraph(models),
@@ -771,7 +805,13 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     security: {
       groups: securityGroups,
       closure: (codes) => groupClosure(securityGroups, codes),
-      enforce: options.security?.enforce ?? true,
+      enforce: mode !== 'off',
+      mode,
+      denied(message) {
+        if (reported.has(message)) return;
+        reported.add(message);
+        onDenied(message);
+      },
     },
     loadOrder: Object.freeze(modules.map((m) => m.name)),
     models,

@@ -30,6 +30,9 @@ export interface ResolvedIdentity {
   readonly groups: readonly string[];
 }
 
+/** The acting uid of `Shutro.bootstrap` scopes: no `res.users` row, so `created_by` / `updated_by` are `NULL`. */
+export const SYSTEM_UID = 0;
+
 const LANG = /^[a-z]{2,3}_[A-Z]{2}$/;
 
 function assertId(value: unknown, what: string): number {

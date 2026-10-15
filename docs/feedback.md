@@ -108,7 +108,10 @@ field is required and typed non-null. The demo guards with `l.order as ... | nul
 "possibly incomplete" when called from onchange.
 
 ### #5 — The first user cannot be created through the ORM
-`dx` · S3
+`dx` · S3 · **fixed** (`bootstrap.integration.test.ts`)
+
+*Resolution:* `shutro.bootstrap({ reason: 'install' }, fn)` runs as the system (`SYSTEM_UID`, 0) in an audited
+superuser scope; `created_by` / `updated_by` are `NULL`, so the first currency, company and user are ORM creates.
 
 Every create records `created_by`, a foreign key to `res.users`; with no user yet, `shutro.run({ user: 1 })` cannot
 insert the first one. The seed uses raw SQL.
@@ -130,7 +133,7 @@ load them correctly.
 **Proposal:** an optional `identity: (uid) => Promise<{ companies, groups }>` hook on `createShutro`, cached per run.
 
 ### #7 — `sql` is not exported by `@shutro/core`
-`dx` · S4
+`dx` · S4 · **fixed**: `sql`, `compile`, `SqlFragment` and `CompiledSql` are re-exported (`shutro` on npm).
 
 Check constraints and partial indexes need the `sql` tag, so model files import `@shutro/sql` as well.
 
@@ -232,7 +235,10 @@ checkCompany) changed every generated file three times.
 **Proposal:** the generator emits added transitions as `(): Promise<void>` members of the view's `methods`.
 
 ### #19 — Default deny makes prototypes and fixtures verbose
-`dx` `security` · S4
+`dx` `security` · S4 · **fixed** (`bootstrap.integration.test.ts`)
+
+*Resolution:* `security: { enforce: 'warn', onDenied? }` reports each missing ACL / field grant once and allows it;
+record rules still apply; refused when `NODE_ENV=production`.
 
 Every model needs `access` before anyone can use it; the engine's own non-security fixtures run with
 `security: { enforce: false }`.
@@ -247,7 +253,7 @@ Bulk imports of documents with lines need two passes (headers, then lines with p
 **Proposal:** accept `create` commands and COPY the children after the parents.
 
 ### #21 — Standard sequences need a pool of at least two connections
-`dx` · S4
+`dx` · S4 · **fixed**: `createShutro` throws `InvalidSequenceError` naming the sequences when `driver.max` is 1.
 
 The non-blocking counter runs in an autonomous transaction on the pool; with `max: 1` it waits for the connection the
 business transaction holds.

@@ -41,6 +41,7 @@ export {
   type SequenceInput,
   type SequenceReset,
 } from '@shutro/sequence';
+export { type CompiledSql, compile, type SqlFragment, sql } from '@shutro/sql';
 export {
   buildComputeGraph,
   type ComputedField,
@@ -50,6 +51,7 @@ export {
 } from './compute/graph.js';
 export type { VerifiedIdentity } from './env/env.js';
 export {
+  type BootstrapOptions,
   createShutro,
   Env,
   type Flags,
@@ -59,7 +61,7 @@ export {
   type Shutro,
   type ShutroOptions,
 } from './env/env.js';
-export type { Identity, ResolvedIdentity } from './env/identity.js';
+export { type Identity, type ResolvedIdentity, SYSTEM_UID } from './env/identity.js';
 export {
   createInspector,
   type InspectedQuery,
@@ -297,5 +299,6 @@ export {
   type RegistryOptions,
   type SchemaOfModule,
   type SchemaOfModules,
+  type SecurityOptions,
   targetOf,
 } from './registry/registry.js';
