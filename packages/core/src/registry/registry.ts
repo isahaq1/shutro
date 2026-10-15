@@ -31,6 +31,7 @@ import {
   type ModelDescription,
   markTransition,
   type OnchangeFn,
+  RESERVED_KEYS,
   type SqlCheckConstraint,
   type SqlUniqueConstraint,
   transitionOf,
@@ -54,6 +55,7 @@ import {
 import type { SequenceDefinition } from '@shutro/sequence';
 import { buildComputeGraph, type ComputeGraph } from '../compute/graph.js';
 import { validateData } from '../data/data.js';
+import { delegatedField } from '../model/field.js';
 import { relatedPath } from '../model/related.js';
 
 type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
@@ -643,6 +645,23 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
       if (!reachable.has(draft.module))
         throw new UndeclaredDependencyError(module.name, ext.name, draft.module, 'an extension');
       applyExtension(draft, ext, module.name, reachable);
+    }
+  }
+
+  // Delegation: the parent's fields (after its extensions) become writable related fields of the child.
+  for (const draft of drafts.values()) {
+    for (const key of (draft.base.definition as { delegates?: readonly string[] }).delegates ??
+      []) {
+      const target = (draft.fields[key] as { target?: string } | undefined)?.target ?? '';
+      const parent = drafts.get(target);
+      if (parent === undefined)
+        throw new UnknownModelError(target, `delegates '${key}' of '${draft.base.name}'`);
+      for (const [pk, pf] of Object.entries(parent.fields)) {
+        if (RESERVED_KEYS.includes(pk) || pk in draft.fields) continue;
+        if (pf.kind === 'one2many' || pf.kind === 'many2many' || pf.kind === 'state') continue;
+        draft.fields[pk] = delegatedField(pf, `${key}.${pk}`);
+        draft.fieldOrigins[pk] = parent.fieldOrigins[pk] ?? parent.module;
+      }
     }
   }
 

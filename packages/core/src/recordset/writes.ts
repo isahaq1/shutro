@@ -137,6 +137,48 @@ async function movePaths(
   }
 }
 
+/**
+ * Delegation: values of the parents' fields go to the parent records. A row without its delegate many2one gets a new
+ * parent (one create per delegate for the whole batch); a row with one updates that parent.
+ */
+async function createDelegates(
+  host: WriteHost,
+  model: AnyModel,
+  rows: readonly Row[],
+): Promise<Row[]> {
+  const out = rows.map((r) => ({ ...r }) as Record<string, unknown>);
+  for (const key of model.delegates) {
+    const target = host.internals.registry.get(
+      (model.fields[key] as { target?: string }).target ?? '',
+    ).model;
+    const own = Object.entries(model.fields)
+      .filter(([, f]) => (f as { delegated?: string }).delegated === key)
+      .map(([k]) => k);
+    const fresh: { index: number; values: Row }[] = [];
+    for (const [index, row] of out.entries()) {
+      const values: Record<string, unknown> = {};
+      for (const k of own)
+        if (row[k] !== undefined) {
+          values[k] = row[k];
+          delete row[k];
+        }
+      if (row[key] === undefined || row[key] === null) fresh.push({ index, values });
+      else if (Object.keys(values).length > 0)
+        await writeRecords(host, target, [row[key] as number], values);
+    }
+    if (fresh.length === 0) continue;
+    const ids = await createRecords(
+      host,
+      target,
+      fresh.map((f) => f.values),
+    );
+    fresh.forEach((f, i) => {
+      (out[f.index] as Record<string, unknown>)[key] = ids[i];
+    });
+  }
+  return out as Row[];
+}
+
 /** The `created_by` / `updated_by` value: `NULL` for the system ({@link SYSTEM_UID}, bootstrap scopes). */
 function actor(internals: ScopeInternals): number | null {
   return internals.uid === SYSTEM_UID ? null : internals.uid;
@@ -274,11 +316,12 @@ function splitRow(
 export async function createRecords(
   host: WriteHost,
   model: AnyModel,
-  rows: readonly Row[],
+  input: readonly Row[],
   options: { readonly copy?: boolean } = {},
 ): Promise<number[]> {
   const { internals } = host;
-  if (rows.length === 0) return [];
+  if (input.length === 0) return [];
+  const rows = model.delegates.length > 0 ? await createDelegates(host, model, input) : input;
   assertAccess(internals, model, 'create');
   if (options.copy === true) assertAccess(internals, model, 'import');
   for (const row of rows) assertFields(internals, model, Object.keys(row), 'write');

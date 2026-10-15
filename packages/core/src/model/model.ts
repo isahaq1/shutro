@@ -240,6 +240,11 @@ export interface ModelDefinition<
    * engine maintains (`'1/5/9/'`), so `childOf` / `parentOf` filters are prefix matches on an index.
    */
   readonly hierarchy?: HierarchySpec<ModelKeys<Fs, A, C>>;
+  /**
+   * Delegation (Odoo `_inherits`): each listed key is a required many2one whose target's fields the records expose
+   * as their own (read, write, filter), stored in the target. Creating a record creates its target record.
+   */
+  readonly delegates?: readonly ModelKeys<Fs, A, C>[];
   readonly indexes?: readonly IndexSpec<ModelKeys<Fs, A, C>>[];
   readonly sqlConstraints?: Readonly<
     Record<string, SqlUniqueConstraint<ModelKeys<Fs, A, C>> | SqlCheckConstraint>
@@ -438,6 +443,7 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly tracking: readonly (keyof Fs & string)[];
   readonly backdate: BackdateSpec<keyof Fs & string> | undefined;
   readonly hierarchy: HierarchySpec<keyof Fs & string> | undefined;
+  readonly delegates: readonly (keyof Fs & string)[];
   readonly indexes: readonly ResolvedIndex<keyof Fs & string>[];
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
@@ -809,6 +815,18 @@ export function defineModel<
     )
       fail(name, 'backdate.graceDays must be a non-negative integer.', 'Use 0 for "today only".');
   }
+  const delegates = [...(definition.delegates ?? [])];
+  for (const key of delegates) {
+    const field = fields[key] as
+      | { kind?: string; required?: boolean; ondelete?: string }
+      | undefined;
+    if (field?.kind !== 'many2one' || field.required !== true || field.ondelete !== 'cascade')
+      fail(
+        name,
+        `delegates '${key}' must be a required many2one with ondelete: 'cascade'.`,
+        `Declare ${key}: f.many2one('<parent model>', { required: true, ondelete: 'cascade' }).`,
+      );
+  }
   const hierarchy = definition.hierarchy;
   if (hierarchy !== undefined) {
     const parent = fields[hierarchy.parent] as { kind?: string; target?: string } | undefined;
@@ -1084,6 +1102,7 @@ export function defineModel<
     tracking: Object.freeze(tracking),
     backdate: backdate === undefined ? undefined : Object.freeze({ ...backdate }),
     hierarchy: hierarchy === undefined ? undefined : Object.freeze({ ...hierarchy }),
+    delegates: Object.freeze(delegates),
     indexes: Object.freeze(indexes),
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),

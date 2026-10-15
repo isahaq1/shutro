@@ -12,6 +12,7 @@ import { toDecimal } from '../money/decimal.js';
 import type { Money } from '../money/money.js';
 import type { Quantity } from '../money/quantity.js';
 import type { Id, X2ManyCommands } from './id.js';
+import { related } from './related.js';
 
 // ------------------------------------------------------------------------------------------------ shared types
 
@@ -1078,6 +1079,30 @@ export interface FieldOverrideChanges {
   /** State additions (RFC 0010 §7.4). */
   readonly transitions?: Readonly<Record<string, Transition<string>>>;
   readonly stateHooks?: Readonly<Record<string, StateHooks>>;
+}
+
+/**
+ * @internal The child's copy of a parent field under delegation (`delegates`): a non-stored related field through
+ * the delegate many2one, writable unless the parent field is readonly.
+ */
+export function delegatedField<F extends Field>(field: F, path: string): F {
+  const r = field.readonly ? related(path) : related(path, { writable: true });
+  return make({
+    ...(field as object),
+    computed: true,
+    store: false,
+    compute: r.compute,
+    inverse: 'inverse' in r ? r.inverse : undefined,
+    depends: r.depends,
+    readonly: field.readonly,
+    required: false,
+    default: undefined,
+    sequence: undefined,
+    index: undefined,
+    column: undefined,
+    tracking: false,
+    delegated: path.slice(0, path.indexOf('.')),
+  }) as unknown as F;
 }
 
 /** @internal Returns a new descriptor with `changes` applied; the registry validates them first. */
