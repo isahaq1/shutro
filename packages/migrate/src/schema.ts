@@ -181,7 +181,7 @@ export function desiredSchema(registry: Registry): Schema {
         continue;
       }
       columns[column] = columnOf(key, field, column);
-      if (field.kind === 'many2one') {
+      if (field.kind === 'many2one' && (field as { foreignKey?: boolean }).foreignKey !== false) {
         const target = registry.get(targetOf(field) ?? '').model;
         foreignKeys[`${model.table}_${column}_fkey`] = {
           column,

@@ -131,7 +131,7 @@ export const AccountMoveLine = defineModel('account.move.line', {
     currency: f.many2one('res.currency', {
       store: true,
       ...compute('account.move.line', 'currency', ['move.currency'], (lines) => {
-        for (const l of lines) l.currency = l.move?.currency.id ?? null; // drafts have no move yet (#4)
+        for (const l of lines) l.currency = l.move.currency.id; // drafts without a move skip this compute
       }),
     }),
     subtotal: f.monetary({

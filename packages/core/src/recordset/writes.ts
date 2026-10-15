@@ -23,6 +23,36 @@ import {
 import { fillSequences, UNNUMBERED } from './sequences.js';
 import { arrayType, fail, normalize, type TranslationContext, valueRef } from './values.js';
 
+/**
+ * Many2one fields without a database foreign key (`foreignKey: false`): the written ids must exist in the target
+ * (one query per field). @throws {MissingRecordError}
+ */
+async function assertReferencesExist(
+  internals: ScopeInternals,
+  model: AnyModel,
+  rows: readonly ReadonlyMap<string, unknown>[],
+): Promise<void> {
+  for (const [key, field] of Object.entries(model.fields)) {
+    if (field.kind !== 'many2one' || (field as { foreignKey?: boolean }).foreignKey !== false)
+      continue;
+    const ids = [
+      ...new Set(
+        rows.map((r) => r.get(key)).filter((v): v is number => typeof v === 'number' && v > 0),
+      ),
+    ];
+    if (ids.length === 0) continue;
+    const target = internals.registry.get(targetOf(field) ?? '').model;
+    const found = await internals.query<{ id: number }>(
+      compile(
+        sql`SELECT ${sql.id('id')} FROM ${sql.id(target.table)} WHERE ${sql.id('id')} = ANY(${sql.array(ids, 'bigint')})`,
+      ),
+    );
+    const existing = new Set(found.map((r) => Number(r.id)));
+    const missing = ids.filter((id) => !existing.has(id));
+    if (missing.length > 0) throw new MissingRecordError(target.name, missing);
+  }
+}
+
 /** The `created_by` / `updated_by` value: `NULL` for the system ({@link SYSTEM_UID}, bootstrap scopes). */
 function actor(internals: ScopeInternals): number | null {
   return internals.uid === SYSTEM_UID ? null : internals.uid;
@@ -203,6 +233,11 @@ export async function createRecords(
       );
     return { stored, commands };
   });
+  await assertReferencesExist(
+    internals,
+    model,
+    prepared.map((p) => p.stored),
+  );
   if (model.backdate !== undefined)
     assertBackdate(
       internals,
@@ -281,7 +316,8 @@ export async function createRecords(
     const childRows = parents.flatMap(({ parent, rows: rs }) =>
       rs.map((r) => ({ ...r, [inverse]: parent })),
     );
-    const childIds = await createRecords(host, target, childRows);
+    // COPY loads COPY their children too (feedback #20): one COPY per child model, ids in order.
+    const childIds = await createRecords(host, target, childRows, options);
     let at = 0;
     for (const { parent, rows: rs } of parents) {
       (host.values(model.name, parent, true) as Map<string, unknown>).set(
@@ -364,6 +400,7 @@ export async function writeRecords(
   assertFields(internals, model, Object.keys(values), 'write');
   if (model.backdate !== undefined && model.backdate.field in values)
     assertBackdate(internals, model, [values[model.backdate.field]]);
+  await assertReferencesExist(internals, model, [new Map(Object.entries(values))]);
   await assertRecords(internals, model, ids, 'write');
   // Money / Quantity checks need the sibling currency / uom values; a moved record needs its old parent.
   const needed = new Set<string>();

@@ -217,6 +217,11 @@ export interface Many2oneOptions<T extends string> extends CommonOptions<Id<T>> 
   readonly ondelete?: OnDelete;
   /** The target must be shared or in the same company as the record (RFC 0003 §7.4). The model must be companyScoped. */
   readonly checkCompany?: boolean;
+  /**
+   * `false`: no database foreign key (e.g. the target is partitioned, RFC 0015). The ORM checks that written ids
+   * exist; deleting the target is not restricted by the database, so `ondelete` cannot be set.
+   */
+  readonly foreignKey?: boolean;
 }
 /** Options of x2many fields (never stored as a column). */
 export interface X2ManyOptions<T extends string>
@@ -291,6 +296,8 @@ export interface Many2oneField<T extends string, Fl extends FieldFlags>
   readonly target: T;
   readonly ondelete: OnDelete;
   readonly checkCompany: boolean;
+  /** `false` when the column has no database foreign key. */
+  readonly foreignKey: boolean;
 }
 /** `f.one2many` descriptor. */
 export interface One2manyField<T extends string, Fl extends FieldFlags>
@@ -962,6 +969,12 @@ export const f = {
     assertModelName(target, 'many2one');
     const opts: Many2oneOptions<T> = options ?? {};
     const ondelete = opts.ondelete ?? 'restrict';
+    if (opts.foreignKey === false && opts.ondelete !== undefined) {
+      throw new InvalidFieldError(
+        'A many2one with foreignKey: false cannot set ondelete: nothing in the database enforces it.',
+        'Remove ondelete, or keep the foreign key.',
+      );
+    }
     if (opts.required === true && ondelete === 'set null') {
       throw new InvalidFieldError(
         "A required many2one cannot use ondelete: 'set null'.",
@@ -975,6 +988,7 @@ export const f = {
       target,
       ondelete,
       checkCompany: opts.checkCompany ?? false,
+      foreignKey: opts.foreignKey !== false,
     }) as Many2oneField<T, FlagsOf<O>>;
   },
 

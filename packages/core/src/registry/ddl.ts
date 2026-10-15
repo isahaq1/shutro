@@ -108,7 +108,7 @@ export function createTableStatements(registry: Registry): readonly CompiledSql[
         continue;
       }
       columns.push(columnDdl(model, key, field, column));
-      if (field.kind === 'many2one') {
+      if (field.kind === 'many2one' && (field as { foreignKey?: boolean }).foreignKey !== false) {
         const target = registry.get(targetOf(field) ?? '').model;
         const onDelete =
           ON_DELETE[(field as unknown as { ondelete: string }).ondelete] ?? 'RESTRICT';

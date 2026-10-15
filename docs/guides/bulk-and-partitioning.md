@@ -44,3 +44,24 @@ pnpm bench                     # 5,000 orders × 3 lines by default locally: BEN
 ```
 
 Each scenario asserts a query budget (the CI gate) and writes `benchmarks/results.json` (timings, uploaded by CI).
+
+## Documents with lines
+
+`copy()` accepts one2many `create` commands: parents are COPY-loaded first, then all their children in one COPY per
+child model, linked in order.
+
+```ts
+await env.model('account.move').copy(rows.map((r) => ({ ...r.header, lines: { create: r.lines } })));
+```
+
+## References into partitioned models
+
+A database foreign key cannot reference a partitioned table without its partition key. Declare the reference
+without one; the ORM checks that every written id exists:
+
+```ts
+move: f.many2one('stock.move', { required: true, foreignKey: false }),
+```
+
+Deleting the target is not restricted by the database (so `ondelete` cannot be set): archive instead, or check in
+the target's unlink path.

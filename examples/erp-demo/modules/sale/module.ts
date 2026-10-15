@@ -112,8 +112,7 @@ export const SaleOrderLine = defineModel('sale.order.line', {
     currency: f.many2one('res.currency', {
       store: true,
       ...compute('sale.order.line', 'currency', ['order.currency'], (lines) => {
-        // An onchange draft may have no order yet, although the field is required (docs/feedback.md #4).
-        for (const l of lines) l.currency = l.order?.currency.id ?? null;
+        for (const l of lines) l.currency = l.order.currency.id; // drafts without an order skip this compute
       }),
     }),
     subtotal: f.monetary({

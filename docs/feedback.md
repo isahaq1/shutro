@@ -99,7 +99,7 @@ tests ("null value in column rounding"). Only boolean and integer literals becom
 **Proposal:** emit `DEFAULT` for every literal default (decimal, text, date, selection) in the DDL and the migrator.
 
 ### #4 — Drafts break the "required" promise inside computes
-`types` · S3
+`types` · S3 · **fixed**: in onchange drafts, a compute is skipped for records whose required many2one in `depends` is still empty, so required relations are always set inside computes (the demo dropped its `?.` guards).
 
 An onchange draft of `sale.order.line` has no `order`, so `l.order` is `null` in the `currency` compute although the
 field is required and typed non-null. The demo guards with `l.order as ... | null`.
@@ -203,7 +203,7 @@ There is no `read_group` equivalent on `ModelRef`; reports drop to `env.sql`, wh
 **Proposal:** `browse()` returns a recordset with the ids (no values) whose writes and methods work without a load.
 
 ### #15 — Reading a stored compute between a write and a flush throws
-`dx` · S4
+`dx` · S4 · **by design (won't fix)**: field reads are synchronous and a recompute may query (computes can be async, e.g. FX); recomputing on write would lose the batching that keeps 1,500 writes at 5 statements. `await env.flush()` or `load([key])` reads the fresh value.
 
 Deliberate (RFC 0008 §11.3: no stale values), but scripts trip on it: after `line.write({ priceUnit })`,
 `order.amountTotal` throws "pending recompute" until `env.flush()` or `load()`.
@@ -246,7 +246,7 @@ Every model needs `access` before anyone can use it; the engine's own non-securi
 **Proposal:** `enforce: 'warn'` for development (log the access that would be denied, allow it), never for production.
 
 ### #20 — `copy()` does not take x2many commands
-`api` · S4
+`api` · S4 · **fixed**: `copy()` takes one2many `create` commands and COPY-loads the children after their parents.
 
 Bulk imports of documents with lines need two passes (headers, then lines with parent ids).
 
@@ -261,7 +261,7 @@ business transaction holds.
 **Proposal:** detect `max: 1` at `createShutro` and fail fast with a hint (or fall back to in-transaction allocation).
 
 ### #22 — Partitioned models cannot be referenced
-`api` · S4
+`api` · S4 · **fixed**: `f.many2one(target, { foreignKey: false })`: no database key, written ids checked by the ORM.
 
 A many2one into a partitioned model is a build error (the FK would need the partition key).
 
