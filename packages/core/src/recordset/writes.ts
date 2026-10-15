@@ -33,11 +33,19 @@ async function assertReferencesExist(
   rows: readonly ReadonlyMap<string, unknown>[],
 ): Promise<void> {
   for (const [key, field] of Object.entries(model.fields)) {
-    if (field.kind !== 'many2one' || (field as { foreignKey?: boolean }).foreignKey !== false)
-      continue;
+    const keyless =
+      (field as { foreignKey?: boolean }).foreignKey === false || field.companyDependent;
+    if (field.kind !== 'many2one' || !keyless) continue;
+    const company = String(internals.env.companyId);
     const ids = [
       ...new Set(
-        rows.map((r) => r.get(key)).filter((v): v is number => typeof v === 'number' && v > 0),
+        rows
+          .map((r) =>
+            field.companyDependent
+              ? ((r.get(key) ?? {}) as Record<string, unknown>)[company]
+              : r.get(key),
+          )
+          .filter((v): v is number => typeof v === 'number' && v > 0),
       ),
     ];
     if (ids.length === 0) continue;
@@ -185,7 +193,11 @@ function actor(internals: ScopeInternals): number | null {
 }
 
 function translationOf(internals: ScopeInternals): TranslationContext {
-  return { lang: internals.env.lang, source: internals.sourceLang };
+  return {
+    lang: internals.env.lang,
+    source: internals.sourceLang,
+    company: internals.env.companyId,
+  };
 }
 
 const CHUNK = 1000;
@@ -337,6 +349,10 @@ export async function createRecords(
       if (stored.has(key)) continue;
       const field = model.fields[key];
       if (field === undefined) continue;
+      if (field.companyDependent) {
+        stored.set(key, Object.freeze({})); // companies without a value read the default
+        continue;
+      }
       let value: unknown;
       if (key === 'createdAt' || key === 'updatedAt') value = internals.now;
       else if (key === 'createdBy' || key === 'updatedBy') value = actor(internals);
@@ -541,6 +557,7 @@ export async function writeRecords(
     if (field?.uomField !== undefined) needed.add(field.uomField);
     if (field?.kind === 'many2one' && internals.registry.compute.inverseKeys(model.name).has(key))
       needed.add(key);
+    if (field?.companyDependent === true) needed.add(key); // merged into the other companies' values
   }
   // The audit trail needs the exact old values of tracked fields (RFC 0013 §7.2).
   if (internals.env.flags.tracking) {

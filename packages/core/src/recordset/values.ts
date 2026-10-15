@@ -11,6 +11,26 @@ import { Decimal as DecimalJs } from 'decimal.js';
 export interface TranslationContext {
   readonly lang: string;
   readonly source: string;
+  /** The current company: company-dependent values are read and written for it. */
+  readonly company?: number;
+}
+
+/** A company-dependent value as stored: `{ "<companyId>": value }`. */
+export type CompanyValues = Readonly<Record<string, unknown>>;
+
+/** The value of a company-dependent field for `company` (the default when the company has none). */
+export function companyValue(field: Field, stored: unknown, company: number): unknown {
+  const map = (stored ?? {}) as CompanyValues;
+  const raw = Object.hasOwn(map, String(company))
+    ? map[String(company)]
+    : typeof field.default === 'function'
+      ? null
+      : (field.default ?? null);
+  if (raw === null || raw === undefined) return null;
+  if (field.kind === 'decimal') return new DecimalJs(String(raw));
+  if (field.kind === 'many2one' || field.kind === 'integer' || field.kind === 'float')
+    return Number(raw);
+  return raw;
 }
 
 import { CurrencyMismatchError, UomMismatchError, ValidationError } from '../errors.js';
@@ -34,15 +54,15 @@ export function fail(
 
 /** The PostgreSQL array element type for a field (for `unnest($n::type[])`). */
 export function arrayType(field: Field): string {
-  if (field.kind === 'many2one') return 'bigint';
   // JSON travels as text and is cast in SQL (columnCast): array parameters of jsonb would be re-encoded by the driver.
   if (columnCast(field) !== undefined) return 'text';
+  if (field.kind === 'many2one') return 'bigint';
   return field.pgType;
 }
 
 /** The SQL cast applied to a bound value before it reaches the column (`jsonb` for json and translatable fields). */
 export function columnCast(field: Field): 'jsonb' | undefined {
-  return field.kind === 'json' || field.translate ? 'jsonb' : undefined;
+  return field.kind === 'json' || field.translate || field.companyDependent ? 'jsonb' : undefined;
 }
 
 /** A reference to the bound value of `column` in the `v` row alias, cast when needed. */
@@ -57,7 +77,8 @@ export function bindValue(field: Field, value: unknown): unknown {
   if (DecimalJs.isDecimal(value)) return (value as DecimalJs).toFixed();
   // Inside arrays, postgres.js would type a Date as a scalar timestamptz; an ISO string lets the ::timestamptz[] cast apply.
   if (value instanceof Date) return value.toISOString();
-  if (field.kind === 'json' || field.translate) return JSON.stringify(value);
+  if (field.kind === 'json' || field.translate || field.companyDependent)
+    return JSON.stringify(value);
   return value;
 }
 
@@ -73,6 +94,34 @@ export function normalize(
   siblings: (key: string) => unknown,
   translation?: TranslationContext,
 ): unknown {
+  if (field.companyDependent) {
+    const company = translation?.company;
+    if (company === undefined)
+      fail(
+        model,
+        [key],
+        'is company-dependent but no company is known.',
+        'Write it inside shutro.run({ company }).',
+      );
+    const plain =
+      value === null
+        ? null
+        : normalize(
+            model,
+            key,
+            { ...field, companyDependent: false },
+            value,
+            siblings,
+            translation,
+          );
+    const existing = siblings(key);
+    const map =
+      typeof existing === 'object' && existing !== null ? (existing as CompanyValues) : {};
+    return Object.freeze({
+      ...map,
+      [String(company)]: DecimalJs.isDecimal(plain) ? (plain as DecimalJs).toFixed() : plain,
+    });
+  }
   const bad = (what: string, hint: string): never =>
     fail(model, [key], `field '${key}' ${what}.`, hint);
   if (value === null) {

@@ -48,6 +48,8 @@ function bind(value: unknown): unknown {
 export interface TranslationScope {
   readonly lang: string;
   readonly source: string;
+  /** The current company, for company-dependent fields. */
+  readonly company?: number;
 }
 
 function column(
@@ -74,6 +76,23 @@ function column(
       `'${key}' of ${model.name} is a ${field.kind} field and cannot be filtered on directly.`,
       'Filter x2many relations with any / all / none (full domain compiler), and non-stored computes in memory.',
     );
+  }
+  if (field.companyDependent) {
+    // The current company's value, else the default: what readers see (RFC 0005 §7.4).
+    if (translation?.company === undefined)
+      throw new InvalidDomainError(
+        `'${key}' is company-dependent and needs the current company.`,
+        'Search inside shutro.run({ company }).',
+      );
+    const literal = typeof field.default === 'function' ? null : (field.default ?? null);
+    const value = sql`(${sql.id(col)}->>${String(translation.company)})`;
+    return {
+      field,
+      column:
+        literal === null
+          ? sql.cast(value, field.valueType)
+          : sql`COALESCE(${sql.cast(value, field.valueType)}, ${sql.param(bind(literal), field.valueType)})`,
+    };
   }
   if (field.translate && translation !== undefined) {
     // COALESCE(col->>lang, col->>source): what readers see, so filters and sorts match reads (RFC 0005 §7.4).

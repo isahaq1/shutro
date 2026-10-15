@@ -106,7 +106,8 @@ function columnOf(key: string, field: Field, column: string): ColumnSpec {
       identity: true,
       backfill: null,
     };
-  const type = field.kind === 'many2one' ? 'bigint' : canonicalType(field.pgType);
+  const type =
+    field.kind === 'many2one' && !field.companyDependent ? 'bigint' : canonicalType(field.pgType);
   const dbDefault = columnDefault(key, field);
   const backfill = typeof field.default === 'function' ? null : literalOf(field.default);
   return {
@@ -181,7 +182,11 @@ export function desiredSchema(registry: Registry): Schema {
         continue;
       }
       columns[column] = columnOf(key, field, column);
-      if (field.kind === 'many2one' && (field as { foreignKey?: boolean }).foreignKey !== false) {
+      if (
+        field.kind === 'many2one' &&
+        (field as { foreignKey?: boolean }).foreignKey !== false &&
+        !field.companyDependent
+      ) {
         const target = registry.get(targetOf(field) ?? '').model;
         foreignKeys[`${model.table}_${column}_fkey`] = {
           column,

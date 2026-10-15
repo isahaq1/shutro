@@ -96,6 +96,12 @@ export interface SqlTag {
   array(values: readonly unknown[], elementType: string): SqlFragment;
 
   /**
+   * A cast of an expression: `sql.cast(expr, 'numeric')` → `(expr)::numeric`. The type name is
+   * validated like `sql.param` casts. @throws {SqlError} `SQL_INVALID_TYPE` or `SQL_NOT_A_FRAGMENT`.
+   */
+  cast(value: SqlFragment, type: string): SqlFragment;
+
+  /**
    * Joins fragments with a separator (default `, `). Joining an empty list renders nothing.
    * @throws {SqlError} `SQL_NOT_A_FRAGMENT` if an item is not a fragment.
    */
@@ -164,6 +170,25 @@ export const sql: SqlTag = Object.assign(tag, {
       );
     }
     return fragment(param(values, `${checkType(elementType)}[]`));
+  },
+
+  cast(value: SqlFragment, type: string): SqlFragment {
+    if (!isSql(value)) {
+      throw new SqlError(
+        'SQL_NOT_A_FRAGMENT',
+        'sql.cast() expects a sql fragment.',
+        'Pass an expression built with the sql tag; cast bound values with sql.param(value, type).',
+      );
+    }
+    const target = checkType(type);
+    return fragment({
+      kind: 'seq',
+      nodes: Object.freeze([
+        Object.freeze({ kind: 'text', text: '(' }),
+        value.node,
+        Object.freeze({ kind: 'text', text: `)::${target}` }),
+      ]) as readonly SqlNode[],
+    });
   },
 
   join(fragments: readonly SqlFragment[], separator: SqlFragment = COMMA): SqlFragment {
