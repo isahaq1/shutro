@@ -29,7 +29,12 @@ const HINT =
 /** True when the environment may perform `perm` on the model (ACL, RFC 0014 §7.2). */
 export function canAccess(internals: ScopeInternals, model: AnyModel, perm: Perm): boolean {
   if (internals.env.su || !internals.registry.security.enforce) return true;
-  return allowed(model.access, internals.env.groups, perm);
+  if (allowed(model.access, internals.env.groups, perm)) return true;
+  if (internals.registry.security.mode !== 'warn') return false;
+  internals.registry.security.denied(
+    `[enforce: 'warn'] ${perm} access to ${model.name} would be denied for groups ${[...internals.env.groups].join(', ') || '(none)'}: add it to the model's access.`,
+  );
+  return true;
 }
 
 /** @throws {AccessError} unless {@link canAccess}. */
@@ -50,7 +55,12 @@ export function canField(
 ): boolean {
   const field = model.fields[key];
   if (field === undefined || internals.env.su || !internals.registry.security.enforce) return true;
-  return fieldAllowed(field.groups, internals.env.groups, kind);
+  if (fieldAllowed(field.groups, internals.env.groups, kind)) return true;
+  if (internals.registry.security.mode !== 'warn') return false;
+  internals.registry.security.denied(
+    `[enforce: 'warn'] ${kind} of ${model.name}.${key} would be denied for groups ${[...internals.env.groups].join(', ') || '(none)'}.`,
+  );
+  return true;
 }
 
 /** @throws {AccessError} naming the first field the environment may not read / write. */

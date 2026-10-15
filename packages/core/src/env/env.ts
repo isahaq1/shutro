@@ -9,6 +9,7 @@ import {
   type Row,
 } from '@shutro/driver-pg';
 import type { KeyRing, Perm } from '@shutro/security';
+import { InvalidSequenceError } from '@shutro/sequence';
 import { compile, sql as sqlTag } from '@shutro/sql';
 import {
   CompanyNotAllowedError,
@@ -40,6 +41,7 @@ import {
   type Identity,
   type ResolvedIdentity,
   resolveIdentity,
+  SYSTEM_UID,
 } from './identity.js';
 import type { Inspector } from './inspector.js';
 import { assertTimeZone, calendarDateIn } from './time.js';
@@ -768,6 +770,14 @@ export interface ShutroOptions<S> {
   readonly onHookError?: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
 }
 
+/** Options of {@link Shutro.bootstrap}. */
+export interface BootstrapOptions {
+  /** Why the system acts (audited), e.g. `'install'`. */
+  readonly reason: string;
+  /** Current company, once one exists; company-scoped defaults and sequences use it. */
+  readonly company?: number;
+}
+
 /** What an identity loader returns for a user. */
 export interface VerifiedIdentity {
   readonly companies: readonly number[];
@@ -787,6 +797,20 @@ export interface Shutro<S = unknown> {
    * @throws {ConcurrentUpdateError} when every attempt conflicted.
    */
   run<T>(options: RunOptions, fn: (env: Env<S>) => Promise<T>): Promise<T>;
+  /**
+   * Runs `fn` as the system (uid {@link SYSTEM_UID}) in a superuser scope, for installing a database before any
+   * user exists (feedback #5): `created_by` / `updated_by` are written as `NULL`, the scope is audited with
+   * `reason`, and the identity loader is not consulted. Pass `company` once the first company exists, so
+   * company-scoped defaults have a value.
+   *
+   * ```ts
+   * await shutro.bootstrap({ reason: 'install' }, async (env) => {
+   *   const [company] = await env.model('res.company').create([{ name: 'Acme', currency: bdt }]);
+   *   await env.model('res.users').create([{ login: 'admin', name: 'Administrator' }]);
+   * });
+   * ```
+   */
+  bootstrap<T>(options: BootstrapOptions, fn: (env: Env<S>) => Promise<T>): Promise<T>;
   /** The environment of the innermost active scope. @throws {NoEnvironmentError} outside `run()`. */
   currentEnv(): Env<S>;
 }
@@ -801,10 +825,28 @@ const defaultHookError = (error: unknown, phase: string): void => {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Standard sequences allocate in a short autonomous transaction on a second connection (RFC 0012 §7.3): with a pool
+ * of one, that waits forever for the connection the business transaction holds (feedback #21).
+ */
+function assertPoolFits<S>(options: ShutroOptions<S>): void {
+  if (options.driver.max === undefined || options.driver.max > 1) return;
+  const registry = options.registry as Registry | undefined;
+  const standard = [...(registry?.sequences.values() ?? [])]
+    .filter((d) => !d.gapless)
+    .map((d) => d.code);
+  if (standard.length === 0) return;
+  throw new InvalidSequenceError(
+    `Sequence(s) ${standard.join(', ')} need a pool of at least 2 connections; the driver has max: 1.`,
+    'Raise the driver max, or declare the sequences gapless: true (allocated inside the business transaction).',
+  );
+}
+
 /** Creates a {@link Shutro} instance on a driver (and a registry). */
 export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> {
   const attempts = options.retry?.attempts ?? 5;
   const backoff = options.retry?.backoffMs ?? defaultBackoff;
+  assertPoolFits(options);
   const runtime: Runtime = {
     als: new AsyncLocalStorage<Scope>(),
     onHookError: options.onHookError ?? defaultHookError,
@@ -843,6 +885,43 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
         }
         identity = { ...identity, groups: Object.freeze([...(asked ?? verified.groups)]) };
       }
+      return execute(identity, runOptions, fn);
+    },
+
+    async bootstrap<T>(
+      bootstrapOptions: BootstrapOptions,
+      fn: (env: Env<S>) => Promise<T>,
+    ): Promise<T> {
+      const reason = assertReason(bootstrapOptions.reason);
+      const company =
+        bootstrapOptions.company === undefined
+          ? SYSTEM_UID
+          : resolveIdentity({ user: 1, company: bootstrapOptions.company }).companyId;
+      const identity: ResolvedIdentity = {
+        uid: SYSTEM_UID,
+        companyId: company,
+        companyIds: Object.freeze([company]),
+        lang: 'en_US',
+        tz: 'UTC',
+        reason,
+        groups: Object.freeze([]),
+      };
+      return execute(identity, { user: 1, company: 1 }, (env) => env.asSuperuser({ reason }, fn));
+    },
+
+    currentEnv(): Env<S> {
+      const scope = runtime.als.getStore();
+      if (scope === undefined) throw new NoEnvironmentError();
+      return scope.env as Env<S>;
+    },
+  };
+
+  async function execute<T>(
+    identity: ResolvedIdentity,
+    runOptions: RunOptions,
+    fn: (env: Env<S>) => Promise<T>,
+  ): Promise<T> {
+    {
       const groups =
         options.registry === undefined
           ? new Set(identity.groups)
@@ -934,12 +1013,6 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
           await sleep(backoff(attempt + 1));
         }
       }
-    },
-
-    currentEnv(): Env<S> {
-      const scope = runtime.als.getStore();
-      if (scope === undefined) throw new NoEnvironmentError();
-      return scope.env as Env<S>;
-    },
-  };
+    }
+  }
 }
