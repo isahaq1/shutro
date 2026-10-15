@@ -7,6 +7,24 @@
 import { DuplicateModelError, InvalidModuleError } from '../errors.js';
 import { type AnyModel, humanize, isModel } from '../model/model.js';
 import { type AnyExtension, isExtension } from './extension.js';
+import type { Registry } from './registry.js';
+
+/** What a data-migration hook receives: raw SQL on the migration transaction, and the registry. */
+export interface MigrationContext {
+  sql<R extends Record<string, unknown> = Record<string, unknown>>(
+    strings: TemplateStringsArray,
+    ...values: readonly unknown[]
+  ): Promise<readonly R[]>;
+  readonly registry: Registry;
+}
+
+/** A per-module data migration: runs once when the module is upgraded past `version` (never on a fresh install). */
+export interface DataMigration {
+  /** `major.minor.patch`; must not exceed the module's version. */
+  readonly version: string;
+  readonly description?: string;
+  readonly up: (ctx: MigrationContext) => Promise<void>;
+}
 
 /** A module without the type parameters that carry its models and dependencies. */
 export interface ModuleBase {
@@ -16,6 +34,8 @@ export interface ModuleBase {
   readonly depends: readonly ModuleBase[];
   readonly models: readonly AnyModel[];
   readonly extensions: readonly AnyExtension[];
+  /** Data-migration hooks, sorted by version. */
+  readonly migrations: readonly DataMigration[];
 }
 
 /** A module as `defineModule` returns it; the type parameters carry the model types for the registry's schema view. */
@@ -47,12 +67,25 @@ export interface ModuleDefinition<
   readonly models: Ms;
   /** Extensions of models owned by (transitive) dependencies. */
   readonly extensions?: Exts;
+  /** Data-migration hooks (see {@link DataMigration}). */
+  readonly migrations?: readonly DataMigration[];
 }
 
 const MODULE_NAME = /^[a-z][a-z0-9_]*$/;
 const VERSION = /^\d+\.\d+\.\d+$/;
 
 const modules = new WeakSet<object>();
+
+/** Numeric comparison of `major.minor.patch` versions. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
 
 /** True when `value` was produced by {@link defineModule}. */
 export function isModule(value: unknown): value is Module {
@@ -121,6 +154,25 @@ export function defineModule<
       );
     }
   });
+  const migrations = [...(definition.migrations ?? [])];
+  for (const m of migrations) {
+    if (!VERSION.test(m.version))
+      throw new InvalidModuleError(
+        `Module '${name}' has a migration with version ${JSON.stringify(m.version)}.`,
+        "Use 'major.minor.patch'.",
+      );
+    if (compareVersions(m.version, version) > 0)
+      throw new InvalidModuleError(
+        `Module '${name}' has a migration for ${m.version}, beyond its version ${version}.`,
+        'Raise the module version, or lower the migration version.',
+      );
+    if (typeof m.up !== 'function')
+      throw new InvalidModuleError(
+        `Module '${name}' migration ${m.version} has no up() function.`,
+        'Pass { version, up: async (ctx) => { ... } }.',
+      );
+  }
+  migrations.sort((a, b) => compareVersions(a.version, b.version));
   const module: Module<Ms, Deps, Exts> = Object.freeze({
     name,
     version,
@@ -128,6 +180,7 @@ export function defineModule<
     depends: Object.freeze([...depends]) as unknown as Deps,
     models: Object.freeze([...definition.models]) as unknown as Ms,
     extensions: Object.freeze([...extensions]) as unknown as Exts,
+    migrations: Object.freeze(migrations),
   });
   modules.add(module);
   return module;

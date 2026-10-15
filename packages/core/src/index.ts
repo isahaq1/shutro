@@ -142,6 +142,7 @@ export { Decimal, type DecimalInput, toDecimal } from './money/decimal.js';
 export { Money, type MoneyJson } from './money/money.js';
 export { defineUom, Quantity, type Uom, type UomInput } from './money/quantity.js';
 export type { RoundingMethod } from './money/rounding.js';
+export { type JunctionTable, junctionTable } from './recordset/relations.js';
 export type {
   Access,
   CreateValues,
@@ -183,8 +184,11 @@ export {
   replace,
 } from './registry/extension.js';
 export {
+  compareVersions,
+  type DataMigration,
   defineModule,
   isModule,
+  type MigrationContext,
   type Module,
   type ModuleBase,
   type ModuleDefinition,
@@ -199,4 +203,5 @@ export {
   type RegistryOptions,
   type SchemaOfModule,
   type SchemaOfModules,
+  targetOf,
 } from './registry/registry.js';

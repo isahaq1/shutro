@@ -176,7 +176,7 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Recordsets with batched prefetch
 
 ### Phase 2 — Schema & modules
-- [ ] Schema diff + migrations
+- [x] Schema diff + migrations (`@shutro/migrate`: catalog diff, versioned SQL files, ledger, module data-migration hooks)
 - [x] Module registry, dependency ordering, model extension (mixins and module flags pending)
 - [ ] Type generation (`shutro generate`)
 
