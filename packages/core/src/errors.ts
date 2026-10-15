@@ -28,6 +28,7 @@ export type ShutroErrorCode =
   | 'FIELD_NOT_LOADED'
   | 'SINGLETON'
   | 'MISSING_RECORD'
+  | 'UNKNOWN_EXTERNAL_ID'
   | 'INVALID_DOMAIN'
   | 'NO_REGISTRY'
   | 'VALIDATION'
@@ -298,6 +299,13 @@ export class MissingRecordError extends ShutroError {
       `${model} record(s) ${ids.join(', ')} do not exist or are not accessible.`,
       'The id may come from stale data or another company; search for the record instead of browsing a remembered id.',
     );
+  }
+}
+
+/** An external id (`module.name`, RFC 0017) that does not exist, or names a record of another model. */
+export class UnknownExternalIdError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('UNKNOWN_EXTERNAL_ID', problem, hint);
   }
 }
 

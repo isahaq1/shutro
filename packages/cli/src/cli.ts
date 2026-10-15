@@ -4,6 +4,7 @@
  */
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { createShutro, loadData } from '@shutro/core';
 import {
   applyMigrations,
   migrationStatus,
@@ -34,7 +35,7 @@ Commands:
   migrate status                         Applied and pending migration files
   migrate plan                           What the database is missing (DDL, destructive statements marked)
   migrate write <name>                   Write the plan as the next migration file
-  migrate apply [--allow-destructive]    Apply pending files, then module data-migration hooks
+  migrate apply [--allow-destructive]    Apply pending files, data-migration hooks, then module data
   inspect [model]                        Modules and models, or one model: fields, origins, methods, computes,
                                          constraints, access and rules
 
@@ -167,7 +168,21 @@ async function migrate(
         for (const m of result.modules)
           io.write(`module    ${m.module} ${m.from ?? '(new)'} → ${m.to}\n`);
         for (const h of result.hooks) io.write(`hook      ${h.module} ${h.version}\n`);
-        if (result.applied.length + result.modules.length === 0) io.write('Up to date.\n');
+        // Module data (RFC 0017), after the schema: idempotent, so it runs at every apply.
+        const data = await loadData(createShutro({ driver, registry }));
+        let dataChanges = 0;
+        for (const d of data) {
+          const changes = d.created.length + d.updated.length + d.deleted.length;
+          dataChanges += changes;
+          if (changes > 0)
+            io.write(
+              `data      ${d.module}: ${d.created.length} created, ${d.updated.length} updated, ${d.deleted.length} deleted, ${d.unchanged} unchanged\n`,
+            );
+          for (const r of d.retained)
+            io.write(`kept      ${r.id} (still referenced: ${r.reason})\n`);
+        }
+        if (result.applied.length + result.modules.length + dataChanges === 0)
+          io.write('Up to date.\n');
         return 0;
       }
       default:

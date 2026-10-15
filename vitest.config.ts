@@ -20,5 +20,9 @@ export default defineConfig({
       'test/**/*.test.ts',
     ],
     passWithNoTests: false,
+    // Integration files each start a PostgreSQL container: half the CPUs keeps Docker responsive, and a longer test
+    // timeout absorbs a loaded machine (5 s defaults flaked under the full suite).
+    maxWorkers: '50%',
+    testTimeout: 30_000,
   },
 });

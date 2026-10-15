@@ -7,6 +7,7 @@
 
 import type { GroupDefinition, PermissionDefinition } from '@shutro/security';
 import type { SequenceDefinition } from '@shutro/sequence';
+import type { DataRecord } from '../data/data.js';
 import { DuplicateModelError, InvalidModuleError } from '../errors.js';
 import { type AnyModel, humanize, isModel } from '../model/model.js';
 import { type AnyExtension, isExtension } from './extension.js';
@@ -45,6 +46,8 @@ export interface ModuleBase {
   readonly groups: readonly GroupDefinition[];
   /** Feature permissions this module declares (RFC 0014 §7.9). */
   readonly permissions: readonly PermissionDefinition[];
+  /** Records the module ships (RFC 0017), in load order. */
+  readonly data: readonly DataRecord[];
 }
 
 /** A module as `defineModule` returns it; the type parameters carry the model types for the registry's schema view. */
@@ -84,6 +87,8 @@ export interface ModuleDefinition<
   readonly groups?: readonly GroupDefinition[];
   /** Feature permissions (`definePermission`): apps, menus, buttons, approvals. */
   readonly permissions?: readonly PermissionDefinition[];
+  /** Records the module ships (`record`, `override`; RFC 0017), loaded in this order by `shutro migrate apply`. */
+  readonly data?: readonly DataRecord[];
 }
 
 const MODULE_NAME = /^[a-z][a-z0-9_]*$/;
@@ -206,6 +211,7 @@ export function defineModule<
     sequences: Object.freeze([...(definition.sequences ?? [])]),
     groups: Object.freeze([...(definition.groups ?? [])]),
     permissions: Object.freeze([...(definition.permissions ?? [])]),
+    data: Object.freeze([...(definition.data ?? [])]),
   });
   modules.add(module);
   return module;

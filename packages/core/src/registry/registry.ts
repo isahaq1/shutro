@@ -53,6 +53,7 @@ import {
 } from '@shutro/security';
 import type { SequenceDefinition } from '@shutro/sequence';
 import { buildComputeGraph, type ComputeGraph } from '../compute/graph.js';
+import { validateData } from '../data/data.js';
 
 type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
   x: infer I,
@@ -136,6 +137,8 @@ export interface Registry<S = unknown> {
   readonly compute: ComputeGraph;
   /** Document sequences by code (RFC 0012 §7.1). */
   readonly sequences: ReadonlyMap<string, SequenceDefinition>;
+  /** External ids the modules' data declares → owning module and model (RFC 0017). */
+  readonly externalIds: ReadonlyMap<string, { readonly module: string; readonly model: string }>;
   /** Security groups and their closure (RFC 0014 §7.1). */
   readonly security: {
     readonly groups: ReadonlyMap<string, GroupDefinition>;
@@ -845,10 +848,12 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     ((message: string): void => {
       process.emitWarning(message, { code: 'SHUTRO_ACCESS_WOULD_DENY' });
     });
+  const externalIds = validateData(modules, models);
   const registry: Registry<Simplify<SchemaOfModules<Mods>>> = {
     modules: Object.freeze(modules),
     compute: buildComputeGraph(models),
     sequences,
+    externalIds,
     security: {
       groups: securityGroups,
       closure: (codes) => groupClosure(securityGroups, codes),
