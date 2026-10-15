@@ -31,7 +31,9 @@ describe('constraints', () => {
       constraints: { viaPath: { depends: ['partner.name'], check: () => [], message: 'x' } },
     });
     const mod = defineModule({ name: 'bad', depends: [base], models: [Bad] });
-    expect(() => buildRegistry({ modules: [mod] })).toThrow(InvalidDependsPathError);
+    expect(() => buildRegistry({ modules: [mod], security: { enforce: false } })).toThrow(
+      InvalidDependsPathError,
+    );
     const Unknown = defineModel('x.unknown', {
       fields: { a: f.char() },
       constraints: { nope: { depends: ['b'], check: () => [], message: 'x' } },
@@ -72,7 +74,7 @@ describe('onchange declarations', () => {
       onchange: { ref: () => undefined },
     });
     const mod = defineModule({ name: 'sale_ref', depends: [sale], models: [], extensions: [ext] });
-    const built = buildRegistry({ modules: [mod] });
+    const built = buildRegistry({ modules: [mod], security: { enforce: false } });
     expect(built.describe('sale.order').onchange).toEqual(['partner', 'currency', 'ref']);
     expect(built.compute.constraints('sale.order', 'ref').map((c) => c.key)).toEqual(['refFormat']);
 
@@ -83,6 +85,8 @@ describe('onchange declarations', () => {
       models: [],
       extensions: [clash],
     });
-    expect(() => buildRegistry({ modules: [bad] })).toThrow(ExtensionConflictError);
+    expect(() => buildRegistry({ modules: [bad], security: { enforce: false } })).toThrow(
+      ExtensionConflictError,
+    );
   });
 });

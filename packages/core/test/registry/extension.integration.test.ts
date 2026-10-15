@@ -40,7 +40,7 @@ const saleMargin = defineModule({
     }),
   ],
 });
-const registry = buildRegistry({ modules: [saleMargin] });
+const registry = buildRegistry({ modules: [saleMargin], security: { enforce: false } });
 
 let pg: StartedPostgres;
 let driver: Driver;

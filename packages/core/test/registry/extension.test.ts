@@ -139,7 +139,10 @@ describe('registry: applying extensions', () => {
         }),
       ],
     });
-    const registry = buildRegistry({ modules: [saleStock, saleMargin] });
+    const registry = buildRegistry({
+      modules: [saleStock, saleMargin],
+      security: { enforce: false },
+    });
     expect(registry.loadOrder).toEqual(['base', 'sale', 'sale_margin', 'stock', 'sale_stock']);
 
     const { model, module, extensions, fieldOrigins, methodLayers } = registry.get('sale.order');
@@ -195,7 +198,7 @@ describe('registry: applying extensions', () => {
         extendModel('sale.order', { overrides: { confirm: replace(() => 'replaced') } }),
       ],
     });
-    const registry = buildRegistry({ modules: [m] });
+    const registry = buildRegistry({ modules: [m], security: { enforce: false } });
     expect((registry.get('sale.order').model.methods as { confirm: () => string }).confirm()).toBe(
       'replaced',
     );
@@ -222,7 +225,7 @@ describe('registry: applying extensions', () => {
         }),
       ],
     });
-    const registry = buildRegistry({ modules: [m] });
+    const registry = buildRegistry({ modules: [m], security: { enforce: false } });
     const { model } = registry.get('sale.order');
     expect(model.fields['name']).toMatchObject({
       label: 'Reference',
@@ -333,12 +336,18 @@ describe('registry: view-safety rules and conflicts (RFC 0002 §7.5, §7.6)', ()
     const { sale } = world();
     const a = extend('a', { fields: { margin: f.decimal({ scale: 2 }) } }, [sale]);
     const c = extend('c', { fields: { margin: f.decimal({ scale: 2 }) } }, [sale]);
-    const e = caught(() => buildRegistry({ modules: [a, c] }), ExtensionConflictError);
+    const e = caught(
+      () => buildRegistry({ modules: [a, c], security: { enforce: false } }),
+      ExtensionConflictError,
+    );
     expect(e.message).toContain("'a'");
     expect(e.message).toContain("'c'");
     const m1 = extend('m1', { methods: { go: () => 1 } }, [sale]);
     const m2 = extend('m2', { methods: { go: () => 2 } }, [sale]);
-    caught(() => buildRegistry({ modules: [m1, m2] }), ExtensionConflictError);
+    caught(
+      () => buildRegistry({ modules: [m1, m2], security: { enforce: false } }),
+      ExtensionConflictError,
+    );
   });
 
   test('extending a model of a module you do not depend on, or that does not exist', () => {
@@ -349,14 +358,20 @@ describe('registry: view-safety rules and conflicts (RFC 0002 §7.5, §7.6)', ()
       models: [],
       extensions: [extendModel('sale.order', { fields: { x: f.char() } })],
     });
-    caught(() => buildRegistry({ modules: [sale, notDependent] }), UndeclaredDependencyError);
+    caught(
+      () => buildRegistry({ modules: [sale, notDependent], security: { enforce: false } }),
+      UndeclaredDependencyError,
+    );
     const missing = defineModule({
       name: 'n',
       depends: [b],
       models: [],
       extensions: [extendModel('no.model', { fields: { x: f.char() } })],
     });
-    caught(() => buildRegistry({ modules: [missing] }), UnknownModelError);
+    caught(
+      () => buildRegistry({ modules: [missing], security: { enforce: false } }),
+      UnknownModelError,
+    );
   });
 
   test('cross-model checks run on extension fields too', () => {

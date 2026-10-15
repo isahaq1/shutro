@@ -236,7 +236,8 @@ describe('defineModel', () => {
       translate: false,
       sequence: null,
       deprecated: null,
-      groups: [],
+      groups: { read: [], write: [] },
+      encrypted: false,
       currencyField: 'currency',
     });
     expect(d.fields['state']).toMatchObject({

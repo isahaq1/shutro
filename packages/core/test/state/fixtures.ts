@@ -133,5 +133,5 @@ export const saleHold = defineModule({
   extensions: [SaleOrderHold],
 });
 
-export const registry = buildRegistry({ modules: [saleHold] });
+export const registry = buildRegistry({ modules: [saleHold], security: { enforce: false } });
 export type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;

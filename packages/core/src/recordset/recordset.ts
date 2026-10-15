@@ -5,7 +5,7 @@
 
 import type { AuditEntry } from '@shutro/audit';
 import { resolveTranslation, type Translations } from '@shutro/i18n';
-import { compile, sql } from '@shutro/sql';
+import { compile, type SqlFragment, sql } from '@shutro/sql';
 import { Decimal as DecimalJs } from 'decimal.js';
 import { type Env, internalsOf, type ScopeInternals } from '../env/env.js';
 import { FieldNotLoadedError, MissingRecordError, SingletonError } from '../errors.js';
@@ -34,6 +34,15 @@ import {
   runOnchange,
 } from './onchange.js';
 import { junctionTable } from './relations.js';
+import {
+  assertAccess,
+  assertFields,
+  domainKeys,
+  explainDenied,
+  loadedValue,
+  readableKeys,
+  ruleConditions,
+} from './security.js';
 import { assignNumbers } from './sequences.js';
 import { availableTransitions, runTransition } from './transitions.js';
 import {
@@ -112,9 +121,11 @@ function withSiblings(model: AnyModel, keys: Iterable<string>): Set<string> {
   return out;
 }
 
-function normalizeSpec(model: AnyModel, registry: Registry, spec: unknown): NormalizedSpec {
-  if (spec === undefined || spec === true)
-    return { fields: withSiblings(model, defaultKeys(model)), relations: new Map() };
+function normalizeSpec(loader: Loader, model: AnyModel, spec: unknown): NormalizedSpec {
+  // Default projections leave out fields the user may not read (RFC 0014 §7.4); explicit keys are checked instead.
+  const defaults = (): Set<string> =>
+    new Set(readableKeys(loader.internals, model, withSiblings(model, defaultKeys(model))));
+  if (spec === undefined || spec === true) return { fields: defaults(), relations: new Map() };
   if (Array.isArray(spec)) {
     for (const key of spec) {
       const field = model.fields[String(key)];
@@ -140,9 +151,9 @@ function normalizeSpec(model: AnyModel, registry: Registry, spec: unknown): Norm
         `'${key}' is not a relation of ${model.name}; nested load specs only take many2one, one2many and many2many fields.`,
       );
     }
-    relations.set(key, normalizeSpec(registry.get(target).model, registry, sub));
+    relations.set(key, normalizeSpec(loader, loader.registry.get(target).model, sub));
   }
-  return { fields: withSiblings(model, defaultKeys(model)), relations };
+  return { fields: defaults(), relations };
 }
 
 // ------------------------------------------------------------------------------------------------ loading
@@ -154,17 +165,18 @@ interface Loader {
 }
 
 function hydrate(
+  loader: Loader,
   model: AnyModel,
   row: Record<string, unknown>,
   keys: Iterable<string>,
-  cache: RecordCache,
 ): number {
   const id = Number(row['id']);
-  const values = valuesOf(cache, model.name, id, true) as Values;
+  const values = valuesOf(loader.internals.cache, model.name, id, true) as Values;
   for (const key of keys) {
     const column = model.columns[key];
     if (column === undefined || key === 'id') continue;
-    values.set(key, row[column] ?? null);
+    const field = model.fields[key] as Field;
+    values.set(key, loadedValue(loader.internals, field, row[column] ?? null));
   }
   return id;
 }
@@ -175,6 +187,7 @@ async function fetchMissing(
   model: AnyModel,
   ids: readonly number[],
   fields: ReadonlySet<string>,
+  user = false,
 ): Promise<void> {
   const { cache } = loader.internals;
   const wanted = [...fields].filter((k) => k !== 'id' && model.columns[k] !== undefined);
@@ -182,7 +195,10 @@ async function fetchMissing(
     const values = valuesOf(cache, model.name, id);
     return values === undefined || wanted.some((k) => !values.has(k));
   });
-  if (missing.length > 0 && wanted.length === 0) await assertExist(loader, model, missing);
+  // User loads carry the read rules (RFC 0014 §7.3); engine loads do not.
+  const rules = user ? ruleConditions(loader.internals, model, 'read') : [];
+  const scope = rules.length === 0 ? sql.empty : sql` AND ${sql.join(rules, sql` AND `)}`;
+  if (missing.length > 0 && wanted.length === 0) await assertExist(loader, model, missing, scope);
   if (missing.length > 0 && wanted.length > 0) {
     const columns = sql.join([sql.id('id'), ...wanted.map((k) => sql.id(model.columns[k] ?? ''))]);
     const seen = new Set<number>();
@@ -190,28 +206,39 @@ async function fetchMissing(
       const chunk = missing.slice(i, i + CHUNK);
       const rows = await loader.internals.query<Record<string, unknown>>(
         compile(
-          sql`SELECT ${columns} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${chunk})`,
+          sql`SELECT ${columns} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${chunk})${scope}`,
         ),
       );
-      for (const row of rows) seen.add(hydrate(model, row, wanted, cache));
+      for (const row of rows) seen.add(hydrate(loader, model, row, wanted));
     }
     const absent = missing.filter((id) => !seen.has(id));
-    if (absent.length > 0) throw new MissingRecordError(model.name, absent);
+    if (absent.length > 0) {
+      if (rules.length > 0) await explainDenied(loader.internals, model, absent, 'read');
+      throw new MissingRecordError(model.name, absent);
+    }
   }
   // Even when every column was cached, the value objects behind monetary / quantity fields may not be.
   await ensureValueObjects(loader, model, ids, fields);
 }
 
-async function assertExist(loader: Loader, model: AnyModel, ids: readonly number[]): Promise<void> {
+async function assertExist(
+  loader: Loader,
+  model: AnyModel,
+  ids: readonly number[],
+  scope: SqlFragment = sql.empty,
+): Promise<void> {
   const rows = await loader.internals.query<{ id: number }>(
     compile(
-      sql`SELECT ${sql.id('id')} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${[...ids]})`,
+      sql`SELECT ${sql.id('id')} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${[...ids]})${scope}`,
     ),
   );
   const found = new Set(rows.map((r) => Number(r.id)));
-  for (const id of ids) valuesOf(loader.internals.cache, model.name, id, true);
   const absent = ids.filter((id) => !found.has(id));
-  if (absent.length > 0) throw new MissingRecordError(model.name, absent);
+  if (absent.length > 0) {
+    if (scope !== sql.empty) await explainDenied(loader.internals, model, absent, 'read');
+    throw new MissingRecordError(model.name, absent);
+  }
+  for (const id of ids) valuesOf(loader.internals.cache, model.name, id, true);
 }
 
 /** Loads the currencies / units referenced by monetary / quantity fields, through the record cache. */
@@ -294,12 +321,19 @@ async function fetchX2Many(
   key: string,
   parents: readonly number[],
   sub: NormalizedSpec,
+  user = false,
 ): Promise<number[]> {
   const { cache } = loader.internals;
   const field = model.fields[key] as Field & { target: string; inverseField?: string };
   const target = loader.registry.get(field.target).model;
   const missing = parents.filter((id) => !valuesOf(cache, model.name, id)?.has(key));
   if (missing.length > 0) await loader.internals.flush(target.name); // re-pointed children must be visible
+  if (user) {
+    assertAccess(loader.internals, target, 'read');
+    assertFields(loader.internals, target, sub.fields, 'read');
+  }
+  const rules = user ? ruleConditions(loader.internals, target, 'read') : [];
+  const scope = rules.length === 0 ? sql.empty : sql` AND ${sql.join(rules, sql` AND `)}`;
   const wanted = [...sub.fields].filter((k) => k !== 'id' && target.columns[k] !== undefined);
   const children = new Map<number, number[]>();
   for (const id of missing) children.set(id, []);
@@ -317,19 +351,19 @@ async function fetchX2Many(
         const inverse = sql.id(target.columns[field.inverseField ?? ''] ?? '');
         rows = await loader.internals.query(
           compile(
-            sql`SELECT ${t}.${inverse} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(target.table)} AS ${t} WHERE ${t}.${inverse} = ANY(${chunk}) ORDER BY ${order}`,
+            sql`SELECT ${t}.${inverse} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(target.table)} AS ${t} WHERE ${t}.${inverse} = ANY(${chunk})${scope} ORDER BY ${order}`,
           ),
         );
       } else {
         const j = junctionTable(model, field, target);
         rows = await loader.internals.query(
           compile(
-            sql`SELECT ${sql.id('rel', j.sourceColumn)} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(j.table)} AS ${sql.id('rel')} INNER JOIN ${sql.id(target.table)} AS ${t} ON ${t}.${sql.id('id')} = ${sql.id('rel', j.targetColumn)} WHERE ${sql.id('rel', j.sourceColumn)} = ANY(${chunk}) ORDER BY ${order}`,
+            sql`SELECT ${sql.id('rel', j.sourceColumn)} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(j.table)} AS ${sql.id('rel')} INNER JOIN ${sql.id(target.table)} AS ${t} ON ${t}.${sql.id('id')} = ${sql.id('rel', j.targetColumn)} WHERE ${sql.id('rel', j.sourceColumn)} = ANY(${chunk})${scope} ORDER BY ${order}`,
           ),
         );
       }
       for (const row of rows) {
-        const childId = hydrate(target, row, wanted, cache);
+        const childId = hydrate(loader, target, row, wanted);
         children.get(Number(row['parent_id']))?.push(childId);
       }
     }
@@ -342,7 +376,7 @@ async function fetchX2Many(
       all.push(child);
   const unique = [...new Set(all)];
   // Lists cached by x2many commands hold ids whose fields were never fetched: load the sub-spec for every child.
-  await fetchMissing(loader, target, unique, sub.fields);
+  await fetchMissing(loader, target, unique, sub.fields, user);
   await computeNonStored(loader, target, unique, sub.fields);
   return unique;
 }
@@ -377,12 +411,17 @@ async function loadInto(
   model: AnyModel,
   ids: readonly number[],
   spec: NormalizedSpec,
+  user = false,
 ): Promise<void> {
   if (ids.length === 0) return;
+  if (user) {
+    assertAccess(loader.internals, model, 'read');
+    assertFields(loader.internals, model, spec.fields, 'read');
+  }
   // Pending triggers first, so stored computes are fresh when they are read (RFC 0008 §7.3).
   if (!loader.internals.compute.recomputing && loader.internals.hasPending())
     await recompute(computeHost(loader));
-  await fetchMissing(loader, model, ids, spec.fields);
+  await fetchMissing(loader, model, ids, spec.fields, user);
   await computeNonStored(loader, model, ids, spec.fields);
   for (const [key, sub] of spec.relations) {
     const field = model.fields[key] as Field & { target: string };
@@ -392,15 +431,18 @@ async function loadInto(
         const value = valuesOf(loader.internals.cache, model.name, id)?.get(key);
         if (typeof value === 'number') targetIds.add(value);
       }
-      await loadInto(loader, loader.registry.get(field.target).model, [...targetIds], sub);
+      await loadInto(loader, loader.registry.get(field.target).model, [...targetIds], sub, user);
     } else {
-      const children = await fetchX2Many(loader, model, key, ids, sub);
+      const children = await fetchX2Many(loader, model, key, ids, sub, user);
       const target = loader.registry.get(field.target).model;
       for (const [k, nested] of sub.relations) {
-        await loadInto(loader, target, children, {
-          fields: new Set(),
-          relations: new Map([[k, nested]]),
-        });
+        await loadInto(
+          loader,
+          target,
+          children,
+          { fields: new Set(), relations: new Map([[k, nested]]) },
+          user,
+        );
       }
     }
   }
@@ -517,20 +559,23 @@ export class RecordSetImpl {
 
   async load(spec?: unknown): Promise<RecordSetImpl> {
     const loader = this.#loader;
-    const normalized = normalizeSpec(this.model, loader.registry, spec);
+    const normalized = normalizeSpec(loader, this.model, spec);
     if (this.#pending !== undefined && this.#ids === undefined) {
       const { parentModel, key, parents, own } = this.#pending;
-      await fetchX2Many(loader, parentModel, key, parents, normalized);
+      await fetchX2Many(loader, parentModel, key, parents, normalized, true);
       const childrenOf = (p: number): number[] =>
         (valuesOf(loader.internals.cache, parentModel.name, p)?.get(key) as number[] | undefined) ??
         [];
       const mine = own.flatMap(childrenOf);
       const all = [...new Set(parents.flatMap(childrenOf))];
       for (const [k, nested] of normalized.relations) {
-        await loadInto(loader, this.model, all, {
-          fields: new Set(),
-          relations: new Map([[k, nested]]),
-        });
+        await loadInto(
+          loader,
+          this.model,
+          all,
+          { fields: new Set(), relations: new Map([[k, nested]]) },
+          true,
+        );
       }
       return new (recordClass(this.model))(
         this.env,
@@ -541,7 +586,7 @@ export class RecordSetImpl {
       );
     }
     const group = this.#group?.ids ?? this.ids;
-    await loadInto(loader, this.model, group, normalized);
+    await loadInto(loader, this.model, group, normalized, true);
     return new (recordClass(this.model))(
       this.env,
       this.registered,
@@ -607,7 +652,9 @@ export class RecordSetImpl {
       readonly action?: AuditEntry['action'];
     } = {},
   ): Promise<AuditEntry[]> {
-    return trailOf(internalsOf(this.env), this.model, await this.resolveIds(), options);
+    const internals = internalsOf(this.env);
+    assertAccess(internals, this.model, 'read');
+    return trailOf(internals, this.model, await this.resolveIds(), options);
   }
 
   /** Numbers unnumbered records of a manual sequence field (RFC 0012 §7.4). */
@@ -655,7 +702,9 @@ export class RecordSetImpl {
         key,
         `'${key}' is not a field of ${this.modelName}.`,
       );
-    const { cache } = internalsOf(this.env);
+    const internals = internalsOf(this.env);
+    if (field.groups.read.length > 0) assertFields(internals, this.model, [key], 'read');
+    const { cache } = internals;
     const values = valuesOf(cache, this.modelName, id);
     if (field.kind === 'one2many' || field.kind === 'many2many') {
       const target = this.#loader.registry.get(targetOf(field) ?? '');
@@ -908,8 +957,18 @@ export function modelRef(
         offset?: number;
       } = {},
     ): Promise<RecordSetImpl> {
+      assertAccess(internals, model, 'read');
+      assertFields(internals, model, domainKeys(query.where), 'read');
+      assertFields(
+        internals,
+        model,
+        (query.order ?? []).map((o) => o.split(' ')[0] ?? ''),
+        'read',
+      );
       await internals.flush(model.name); // the search must see pending writes (and computes)
-      const fields = withSiblings(model, defaultKeys(model));
+      const fields = new Set(
+        readableKeys(internals, model, withSiblings(model, defaultKeys(model))),
+      );
       const wanted = [...fields].filter((k) => k !== 'id' && model.columns[k] !== undefined);
       const columns = sql.join([
         sql.id('id'),
@@ -919,6 +978,7 @@ export function modelRef(
       const conditions = [
         ...compileDomain(model, query.where, translation),
         ...scopingConditions(model, env),
+        ...ruleConditions(internals, model, 'read'),
       ];
       const where =
         conditions.length === 0 ? sql.empty : sql` WHERE ${sql.join(conditions, sql` AND `)}`;
@@ -929,7 +989,7 @@ export function modelRef(
           sql`SELECT ${columns} FROM ${sql.id(model.table)}${where} ORDER BY ${compileOrder(model, query.order, translation)}${limit}${offset}`,
         ),
       );
-      const ids = rows.map((row) => hydrate(model, row, wanted, internals.cache));
+      const ids = rows.map((row) => hydrate(loader, model, row, wanted));
       await ensureValueObjects(loader, model, ids, fields);
       return new (recordClass(model))(env, registered, ids, { ids }, undefined);
     },

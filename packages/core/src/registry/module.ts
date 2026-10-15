@@ -5,6 +5,7 @@
  * (until `shutro generate` emits the same view).
  */
 
+import type { GroupDefinition } from '@shutro/security';
 import type { SequenceDefinition } from '@shutro/sequence';
 import { DuplicateModelError, InvalidModuleError } from '../errors.js';
 import { type AnyModel, humanize, isModel } from '../model/model.js';
@@ -40,6 +41,8 @@ export interface ModuleBase {
   readonly migrations: readonly DataMigration[];
   /** Document sequences this module declares (RFC 0012 §7.1). */
   readonly sequences: readonly SequenceDefinition[];
+  /** Security groups this module declares (RFC 0014 §7.1). */
+  readonly groups: readonly GroupDefinition[];
 }
 
 /** A module as `defineModule` returns it; the type parameters carry the model types for the registry's schema view. */
@@ -75,6 +78,8 @@ export interface ModuleDefinition<
   readonly migrations?: readonly DataMigration[];
   /** Document sequences (`defineSequence`). */
   readonly sequences?: readonly SequenceDefinition[];
+  /** Security groups (`defineGroup`). */
+  readonly groups?: readonly GroupDefinition[];
 }
 
 const MODULE_NAME = /^[a-z][a-z0-9_]*$/;
@@ -195,6 +200,7 @@ export function defineModule<
     extensions: Object.freeze([...extensions]) as unknown as Exts,
     migrations: Object.freeze(migrations),
     sequences: Object.freeze([...(definition.sequences ?? [])]),
+    groups: Object.freeze([...(definition.groups ?? [])]),
   });
   modules.add(module);
   return module;

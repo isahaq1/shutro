@@ -49,6 +49,12 @@ function column(
       `Fields: ${Object.keys(model.fields).join(', ')}.`,
     );
   }
+  if (field.encrypted) {
+    throw new InvalidDomainError(
+      `'${key}' of ${model.name} is encrypted and cannot be filtered or sorted on.`,
+      'Encrypted values are opaque to the database; filter in memory after loading, or store a searchable hash in another field.',
+    );
+  }
   if (col === undefined) {
     throw new InvalidDomainError(
       `'${key}' of ${model.name} is a ${field.kind} field and cannot be filtered on directly.`,
@@ -131,6 +137,25 @@ export function compileDomain(
   const conditions: SqlFragment[] = [];
   for (const [key, value] of Object.entries(where ?? {})) {
     if (value === undefined) continue;
+    if (key === 'or' || key === 'and') {
+      if (!Array.isArray(value))
+        throw new InvalidDomainError(
+          `'${key}' needs an array of domains.`,
+          "Use { or: [{ state: 'draft' }, { user: 7 }] }.",
+        );
+      const parts = value.map((d) => {
+        const inner = compileDomain(model, d as Record<string, unknown>, translation);
+        return inner.length === 0 ? sql`TRUE` : sql`(${sql.join(inner, sql` AND `)})`;
+      });
+      if (parts.length > 0)
+        conditions.push(sql`(${sql.join(parts, key === 'or' ? sql` OR ` : sql` AND `)})`);
+      continue;
+    }
+    if (key === 'not') {
+      const inner = compileDomain(model, value as Record<string, unknown>, translation);
+      if (inner.length > 0) conditions.push(sql`NOT (${sql.join(inner, sql` AND `)})`);
+      continue;
+    }
     const { column: col } = column(model, key, translation);
     if (isOperators(value)) {
       for (const [op, operand] of Object.entries(value)) {

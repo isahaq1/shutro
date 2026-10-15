@@ -42,7 +42,7 @@ const saleStock = defineModule({
   ],
 });
 
-const registry = buildRegistry({ modules: [saleStock] });
+const registry = buildRegistry({ modules: [saleStock], security: { enforce: false } });
 type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;
 
 test('extension fields are part of the model type', () => {

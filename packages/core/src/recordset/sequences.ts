@@ -10,6 +10,7 @@ import {
   formatNumber,
   numbersFrom,
   periodKey,
+  SEQUENCE_TABLE,
   type SequenceDefinition,
   sequenceTableStatements,
 } from '@shutro/sequence';
@@ -27,7 +28,12 @@ const ensured = new WeakSet<Driver>();
 
 async function ensureTable(driver: Driver): Promise<void> {
   if (ensured.has(driver)) return;
-  for (const statement of sequenceTableStatements()) await driver.query(statement);
+  const [row] = await driver.query<{ present: boolean }>({
+    text: `SELECT to_regclass('${SEQUENCE_TABLE}') IS NOT NULL AS present`,
+    params: [],
+  });
+  if (row?.present !== true)
+    for (const statement of sequenceTableStatements()) await driver.query(statement);
   ensured.add(driver);
 }
 

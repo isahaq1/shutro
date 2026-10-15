@@ -21,6 +21,20 @@ export {
   type Translations,
 } from '@shutro/i18n';
 export {
+  type AccessSpec,
+  createKeyRing,
+  defineGroup,
+  EncryptionError,
+  type FieldGroups,
+  type FieldGroupsInput,
+  type GroupDefinition,
+  type KeyRing,
+  type Perm,
+  type RulePerm,
+  type RuleSpec,
+  SecurityDefinitionError,
+} from '@shutro/security';
+export {
   defineSequence,
   InvalidSequenceError,
   type SequenceDefinition,
@@ -47,6 +61,7 @@ export {
 export type { Identity, ResolvedIdentity } from './env/identity.js';
 export { assertTimeZone, calendarDateIn } from './env/time.js';
 export {
+  AccessError,
   CompanyNotAllowedError,
   ComputeAssignmentError,
   ComputeCycleError,
@@ -192,6 +207,7 @@ export { defineUom, Quantity, type Uom, type UomInput } from './money/quantity.j
 export type { RoundingMethod } from './money/rounding.js';
 export { coalesceAudit, isTracked } from './recordset/audit.js';
 export { type JunctionTable, junctionTable } from './recordset/relations.js';
+export { modelPolicies, rlsStatements, ruleCondition } from './recordset/rls.js';
 export { UNNUMBERED } from './recordset/sequences.js';
 export type {
   Access,

@@ -9,6 +9,7 @@ import type { AnyModel } from '../model/model.js';
 import { trackChange } from './audit.js';
 import type { ComputeHost } from './compute.js';
 import { failingIds } from './constraints.js';
+import { assertAccess, assertRecords } from './security.js';
 
 type Hook = (this: unknown, records: unknown) => unknown;
 
@@ -29,6 +30,8 @@ export async function runTransition(
 ): Promise<void> {
   if (ids.length === 0) return;
   const { internals } = host;
+  assertAccess(internals, model, 'write');
+  await assertRecords(internals, model, ids, 'write');
   const field = model.fields[key] as Field & StateFieldRuntime;
   const transition = field.transitions[name];
   if (transition === undefined) throw new InvalidTransitionError(model.name, name, [], []);

@@ -5,7 +5,7 @@ import { expectTypeOf, test } from 'vitest';
 import { buildRegistry, type Env, type Id, Money } from '../../src/index.js';
 import { sale } from './fixtures.js';
 
-const registry = buildRegistry({ modules: [sale] });
+const registry = buildRegistry({ modules: [sale], security: { enforce: false } });
 type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;
 
 declare const partner: Id<'res.partner'>;

@@ -8,6 +8,7 @@ import {
   isRetryable,
   type Row,
 } from '@shutro/driver-pg';
+import type { KeyRing, Perm } from '@shutro/security';
 import { compile, sql as sqlTag } from '@shutro/sql';
 import {
   CompanyNotAllowedError,
@@ -28,6 +29,7 @@ import {
   modelRef,
   type RecordCache,
 } from '../recordset/recordset.js';
+import { assertAccess, canAccess, canField } from '../recordset/security.js';
 import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ModelName, ModelRef } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
@@ -148,6 +150,8 @@ interface Runtime {
   readonly registry: Registry | undefined;
   /** The pool, for autonomous transactions (standard sequences, RFC 0012 §7.2). */
   readonly driver: Driver;
+  /** Encryption keys for `encrypted` fields (RFC 0014 §7.6), or none. */
+  readonly keys: KeyRing | undefined;
   /** The language translations fall back to (RFC 0011). */
   readonly sourceLang: string;
 }
@@ -173,6 +177,7 @@ export interface ScopeInternals {
   cachedValues(model: string): Iterable<Map<string, unknown>>;
   readonly sourceLang: string;
   readonly driver: Driver;
+  readonly keys: KeyRing | undefined;
   /** Pending audit rows (RFC 0013 §7.2). */
   readonly auditRows: AuditRowInput[];
   readonly tx: string;
@@ -234,6 +239,10 @@ export class Env<S = unknown> {
   readonly su: boolean;
   /** Reason for a job or superuser scope, when given. */
   readonly reason: string | undefined;
+  /** The user's security groups, closed over `implies` (RFC 0014 §7.1). */
+  readonly groups: ReadonlySet<string>;
+  /** @internal Encryption keys. */
+  readonly keys: KeyRing | undefined;
   readonly flags: Flags;
   /** 1 for the first attempt of `run()`, 2+ for retries after a serialization failure or deadlock. */
   readonly attempt: number;
@@ -257,6 +266,11 @@ export class Env<S = unknown> {
     this.companyIds = identity.companyIds;
     this.lang = identity.lang;
     this.sourceLang = runtime.sourceLang;
+    this.groups =
+      runtime.registry === undefined
+        ? new Set(identity.groups)
+        : runtime.registry.security.closure(identity.groups);
+    this.keys = runtime.keys;
     this.tz = identity.tz;
     this.su = identity.su;
     this.reason = identity.reason;
@@ -286,6 +300,22 @@ export class Env<S = unknown> {
     this.#assertUsable();
     // The runtime is untyped over S; widening here is safe because it never reads S.
     return modelRef(this as unknown as Env, name) as unknown as ModelRef<S, M>;
+  }
+
+  /** What this environment may do (RFC 0014): for Kosh menus, export / import buttons and API guards. */
+  get access(): {
+    can(model: ModelName<S>, perm: Perm): boolean;
+    /** @throws {AccessError} */
+    check(model: ModelName<S>, perm: Perm): void;
+    canField(model: ModelName<S>, field: string, kind: 'read' | 'write'): boolean;
+  } {
+    const scope = internalsOf(this as unknown as Env);
+    return {
+      can: (model, perm) => canAccess(scope, scope.registry.get(model).model, perm),
+      check: (model, perm) => assertAccess(scope, scope.registry.get(model).model, perm),
+      canField: (model, field, kind) =>
+        canField(scope, scope.registry.get(model).model, field, kind),
+    };
   }
 
   /** Dated, per-company currency conversion (RFC 0006 §7.6). Needs a `res.currency.rate` model. */
@@ -445,7 +475,15 @@ export class Env<S = unknown> {
     const su = this.#derive({ su: true, reason });
     if (this.#runtime.registry !== undefined)
       trackSuperuser(internalsOf(su as unknown as Env), reason);
-    return fn(su);
+    // RLS policies read shutro.su: the setting is scoped to the call (RFC 0014 §7.5).
+    const wasSu = this.su;
+    if (!wasSu) await this.#query(compile(sqlTag`SELECT set_config(${'shutro.su'}, ${'1'}, true)`));
+    try {
+      return await fn(su);
+    } finally {
+      if (!wasSu)
+        await this.#query(compile(sqlTag`SELECT set_config(${'shutro.su'}, ${'0'}, true)`));
+    }
   }
 
   async #query<R extends Row>(query: DriverQuery): Promise<readonly R[]> {
@@ -465,6 +503,7 @@ export class Env<S = unknown> {
         lang: this.lang,
         tz: this.tz,
         reason: this.reason,
+        groups: [...this.groups],
         su: this.su,
         flags: this.flags,
         readOnly: this.readOnly,
@@ -576,6 +615,7 @@ function scopeInternals(
     cachedValues: (model) => root.cache.records.get(model)?.values() ?? [],
     sourceLang: env.sourceLang,
     driver,
+    keys: env.keys,
     auditRows: root.audit,
     tx: root.tx,
     flush: (model) => flushAll(internalsOf(env), model),
@@ -676,6 +716,8 @@ export interface ShutroOptions<S> {
   readonly registry?: Registry<S>;
   /** The source language of translatable fields: what readers of a language without text see. Default `en_US`. */
   readonly sourceLang?: string;
+  /** Keys for `encrypted` fields (RFC 0014 §7.6): `createKeyRing({ current, keys })`. */
+  readonly keys?: KeyRing;
   /** Retry policy for serialization failures and deadlocks. Default: 5 attempts with jittered exponential backoff. */
   readonly retry?: {
     readonly attempts?: number;
@@ -726,12 +768,17 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
     registry: options.registry as Registry | undefined,
     sourceLang: assertLang(options.sourceLang ?? 'en_US'),
     driver: options.driver,
+    keys: options.keys,
   };
   const NOW = compile(sqlTag`SELECT now() AS now`);
 
   return {
     async run<T>(runOptions: RunOptions, fn: (env: Env<S>) => Promise<T>): Promise<T> {
       const identity = resolveIdentity(runOptions);
+      const groups =
+        options.registry === undefined
+          ? new Set(identity.groups)
+          : (options.registry as Registry).security.closure(identity.groups);
       const maxAttempts = runOptions.retry === false ? 1 : attempts;
       for (let attempt = 1; ; attempt++) {
         let scope: Scope | undefined;
@@ -742,7 +789,10 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
               readOnly: runOptions.readOnly ?? false,
               settings: {
                 'shutro.user_id': String(identity.uid),
+                'shutro.company_id': String(identity.companyId),
                 'shutro.company_ids': `{${identity.companyIds.join(',')}}`,
+                'shutro.groups': [...groups].join(','),
+                'shutro.su': '0',
                 timezone: 'UTC',
               },
             },

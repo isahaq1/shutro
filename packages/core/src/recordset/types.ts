@@ -256,6 +256,11 @@ export type Domain<S, M extends ModelName<S>> = {
   readonly [K in DomainKeys<S, M>]?: K extends 'id'
     ? Id<M> | DomainOperators<Id<M>>
     : DomainValue<FieldsOf<S, M>[K]>;
+} & {
+  /** Any of the domains. */
+  readonly or?: readonly Domain<S, M>[];
+  readonly and?: readonly Domain<S, M>[];
+  readonly not?: Domain<S, M>;
 };
 /** `'field'`, `'field asc'` or `'field desc'` over sortable (non-x2many) fields. */
 export type SearchOrder<S, M extends ModelName<S>> =

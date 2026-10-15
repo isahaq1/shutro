@@ -47,5 +47,5 @@ export const SaleOrder = defineModel('sale.order', {
 });
 export const sale = defineModule({ name: 'sale', depends: [base], models: [SaleOrder] });
 
-export const registry = buildRegistry({ modules: [sale] });
+export const registry = buildRegistry({ modules: [sale], security: { enforce: false } });
 export type S = typeof registry extends { readonly '~schema'?: infer X } ? NonNullable<X> : never;

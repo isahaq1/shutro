@@ -8,6 +8,7 @@ import type { ScopeInternals } from '../env/env.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { type ComputeHost, computeFields } from './compute.js';
+import { assertAccess } from './security.js';
 import { fail, normalize, type TranslationContext } from './values.js';
 
 /** What the draft runtime needs from the recordset runtime. */
@@ -194,6 +195,7 @@ export async function runOnchange(
   input: OnchangeInputRaw,
 ): Promise<OnchangeResultRaw> {
   const { internals } = host;
+  assertAccess(internals, model, 'read');
   const warnings: string[] = [];
   const childIds = new Map<string, number[]>();
   const wasRecomputing = internals.compute.recomputing;
