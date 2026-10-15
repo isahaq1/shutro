@@ -1,17 +1,30 @@
 /**
- * `buildRegistry()` (RFC 0002 §7.4, first half: loading and cross-model checks). Extensions, overrides and mixins
- * come with the second half. The registry's type is the schema view of every model in the module tree.
+ * `buildRegistry()` (RFC 0002 §7.4): loads modules in dependency order, applies extensions under the view-safety
+ * rules, composes method chains, and runs the cross-model checks. The registry's type is the schema view of every
+ * model (with its extensions) in the module tree.
  */
 import {
   DuplicateModelError,
   DuplicateModuleError,
+  ExtensionConflictError,
   InvalidDependsPathError,
+  InvalidExtensionError,
   InvalidRelationError,
   UndeclaredDependencyError,
   UnknownModelError,
 } from '../errors.js';
-import type { Field } from '../model/field.js';
-import type { AnyModel, FieldDescription, ModelDescription } from '../model/model.js';
+import { type Field, overrideField } from '../model/field.js';
+import {
+  type AnyModel,
+  type ConstraintSpec,
+  defineModel,
+  type FieldDescription,
+  type IndexSpec,
+  type ModelDescription,
+  type SqlCheckConstraint,
+  type SqlUniqueConstraint,
+} from '../model/model.js';
+import type { AnyExtension, OverrideFn } from './extension.js';
 import { isModule, type Module, type ModuleBase } from './module.js';
 
 // ------------------------------------------------------------------------------------------------- schema types
@@ -22,18 +35,23 @@ type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) exten
   ? I
   : never;
 type Simplify<T> = { [K in keyof T]: T[K] } & NonNullable<unknown>;
-/** Models keyed by name; the wide `AnyModel` (name: string) contributes nothing. */
-type ModelsToSchema<M> = {
-  [X in M as X extends { readonly name: infer N extends string }
-    ? string extends N
-      ? never
-      : N
-    : never]: X;
-};
-/** The schema view of one module: its models plus those of its dependencies, recursively. */
+type NameOf<X> = X extends { readonly name: infer N extends string }
+  ? string extends N
+    ? never
+    : N
+  : never;
+/** Models and extensions keyed by name; several contributions to one name intersect (fields and methods merge). */
+type ByName<X> = UnionToIntersection<
+  X extends unknown
+    ? NameOf<X> extends never
+      ? NonNullable<unknown>
+      : { readonly [K in NameOf<X>]: X }
+    : never
+>;
+/** The schema view of one module: its models and extensions plus those of its dependencies, recursively. */
 export type SchemaOfModule<M> =
-  M extends Module<infer Ms, infer Deps>
-    ? ModelsToSchema<Ms[number]> & SchemaOfModules<Deps>
+  M extends Module<infer Ms, infer Deps, infer Exts>
+    ? ByName<Ms[number] | Exts[number]> & SchemaOfModules<Deps>
     : NonNullable<unknown>;
 /** The schema view of several modules. */
 export type SchemaOfModules<Mods> = Mods extends readonly [infer H, ...infer T]
@@ -46,10 +64,24 @@ export type SchemaOfModules<Mods> = Mods extends readonly [infer H, ...infer T]
 
 // ------------------------------------------------------------------------------------------------------ types
 
-/** A model and the module that owns it. */
-export interface RegisteredModel {
-  readonly model: AnyModel;
+/** One layer of a method: the definition, an override that calls `next`, or a replacement (RFC 0002 §7.4 step 6). */
+export interface MethodLayer {
   readonly module: string;
+  readonly kind: 'definition' | 'override' | 'replace';
+}
+
+/** A model with its extensions applied, and where everything came from. */
+export interface RegisteredModel {
+  /** The final model (base definition plus extensions, rebuilt through `defineModel`). */
+  readonly model: AnyModel;
+  /** The owning module. */
+  readonly module: string;
+  /** Modules that extended the model, in load order. */
+  readonly extensions: readonly string[];
+  /** Field key → contributing module. */
+  readonly fieldOrigins: Readonly<Record<string, string>>;
+  /** Method name → layers, innermost first. */
+  readonly methodLayers: Readonly<Record<string, readonly MethodLayer[]>>;
 }
 
 /** Where a model or field comes from. */
@@ -60,7 +92,9 @@ export interface Origin {
 /** `ModelDescription` plus provenance (RFC 0001 §9, RFC 0002 §9). */
 export interface RegistryModelDescription extends Omit<ModelDescription, 'fields'> {
   readonly origin: Origin;
+  readonly extensions: readonly string[];
   readonly fields: Readonly<Record<string, FieldDescription & { readonly origin: Origin }>>;
+  readonly methodLayers: Readonly<Record<string, readonly MethodLayer[]>>;
 }
 
 /** The built, frozen registry. `S` is the schema view: model name → model type. */
@@ -71,17 +105,19 @@ export interface Registry<S = unknown> {
   readonly modules: readonly ModuleBase[];
   /** Module names in load order. */
   readonly loadOrder: readonly string[];
-  /** Models in load order (modules first, then definition order). */
+  /** Models in load order (owning modules first, then definition order). */
   readonly models: ReadonlyMap<string, RegisteredModel>;
   has(name: string): boolean;
   /** @throws {UnknownModelError} */
   get(name: string): RegisteredModel;
   /** @throws {UnknownModelError} */
   describe(name: string): RegistryModelDescription;
+  /** The layers of a method, innermost first (`shutro inspect`). @throws {UnknownModelError} */
+  explain(model: string, method: string): readonly MethodLayer[];
 }
 
 /** Options of {@link buildRegistry}. */
-export interface RegistryOptions<Mods extends readonly Module[]> {
+export interface RegistryOptions<Mods extends readonly ModuleBase[]> {
   /** The application's modules; their dependencies are collected transitively. */
   readonly modules: Mods;
 }
@@ -94,6 +130,8 @@ export function targetOf(field: Field): string | undefined {
     ? (field as unknown as { target: string }).target
     : undefined;
 }
+
+// ----------------------------------------------------------------------------------------------------- loading
 
 /** Collects every module reachable from the roots and checks that names are unique. */
 function collect(roots: readonly ModuleBase[]): Map<string, ModuleBase> {
@@ -147,34 +185,305 @@ function closure(module: ModuleBase): Set<string> {
   return names;
 }
 
+// ------------------------------------------------------------------------------------------------ extensions
+
+type AnyFn = (this: unknown, ...args: never[]) => unknown;
+
+/** The merged state of one model while extensions are applied. */
+interface Draft {
+  readonly base: AnyModel;
+  readonly module: string;
+  readonly extensions: string[];
+  readonly fields: Record<string, Field>;
+  readonly fieldOrigins: Record<string, string>;
+  readonly methods: Record<string, AnyFn>;
+  readonly methodLayers: Record<string, MethodLayer[]>;
+  readonly constraints: Record<string, ConstraintSpec>;
+  readonly sqlConstraints: Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>;
+  readonly indexes: IndexSpec<string>[];
+  readonly tracking: string[];
+}
+
+function draftOf(model: AnyModel, module: string): Draft {
+  const fieldOrigins: Record<string, string> = {};
+  for (const key of Object.keys(model.fields)) fieldOrigins[key] = module;
+  const methodLayers: Record<string, MethodLayer[]> = {};
+  for (const key of Object.keys(model.methods))
+    methodLayers[key] = [{ module, kind: 'definition' }];
+  const def = model.definition;
+  return {
+    base: model,
+    module,
+    extensions: [],
+    fields: { ...(def.fields as Record<string, Field>) },
+    fieldOrigins,
+    methods: { ...(model.methods as Record<string, AnyFn>) },
+    methodLayers,
+    constraints: { ...(def.constraints ?? {}) },
+    sqlConstraints: { ...(def.sqlConstraints ?? {}) } as Record<
+      string,
+      SqlUniqueConstraint<string> | SqlCheckConstraint
+    >,
+    indexes: [...(def.indexes ?? [])] as IndexSpec<string>[],
+    tracking: [...(def.tracking ?? [])],
+  };
+}
+
+/** Wraps `prev` with `layer`: `layer.call(this, next, ...args)` where `next` is `prev` bound to `this`. */
+function compose(prev: AnyFn, layer: OverrideFn): AnyFn {
+  return function composed(this: unknown, ...args: never[]): unknown {
+    const next = (...nextArgs: never[]): unknown => prev.apply(this, nextArgs);
+    return layer.call(this, next as never, ...args);
+  };
+}
+
+function applyExtension(
+  draft: Draft,
+  ext: AnyExtension,
+  module: string,
+  reachable: ReadonlySet<string>,
+): void {
+  const where = `Module '${module}' extending '${ext.name}'`;
+  const conflict = (what: string, key: string, origin: string, fix: string): never => {
+    const problem = reachable.has(origin)
+      ? `${where}: ${what} '${key}' already exists (from '${origin}').`
+      : `${what} '${key}' of '${ext.name}' is added by both '${origin}' and '${module}', which do not depend on each other.`;
+    throw new ExtensionConflictError(problem, fix);
+  };
+
+  for (const [key, field] of Object.entries(ext.fields)) {
+    const origin = draft.fieldOrigins[key];
+    if (origin !== undefined) {
+      conflict(
+        'field',
+        key,
+        origin,
+        reachable.has(origin)
+          ? 'Use fieldOverrides to change an existing field.'
+          : 'Rename one field, or make one module depend on the other and use fieldOverrides.',
+      );
+    }
+    if (
+      field.required &&
+      field.default === undefined &&
+      !field.computed &&
+      field.kind !== 'boolean'
+    ) {
+      throw new InvalidExtensionError(
+        `${where}: the new field '${key}' is required but has no default.`,
+        'A required field added by an extension needs a default or a compute (RFC 0002 S1), so code that does not know the field can still create records.',
+      );
+    }
+    draft.fields[key] = field;
+    draft.fieldOrigins[key] = module;
+  }
+
+  for (const [key, override] of Object.entries(ext.fieldOverrides)) {
+    const field = draft.fields[key];
+    if (field === undefined) {
+      const implicit = draft.base.fields[key] !== undefined;
+      throw new InvalidExtensionError(
+        `${where}: fieldOverrides names '${key}', which is ${implicit ? 'an implicit field' : 'not a field'} of '${ext.name}'.`,
+        implicit
+          ? 'Implicit fields (id, createdAt, company, ...) cannot be overridden.'
+          : `Fields: ${Object.keys(draft.fields).join(', ')}.`,
+      );
+    }
+    const changes: Parameters<typeof overrideField>[1] & {
+      selection?: readonly (readonly [string, string])[];
+    } = {};
+    for (const [attr, value] of Object.entries(override)) {
+      if (value === undefined) continue;
+      switch (attr) {
+        case 'label':
+        case 'help':
+        case 'default':
+        case 'index':
+        case 'tracking':
+        case 'copy':
+        case 'groups':
+          Object.assign(changes, { [attr]: value });
+          break;
+        case 'required': {
+          if (value === false && field.required) {
+            throw new InvalidExtensionError(
+              `${where}: fieldOverrides.${key} relaxes required to false.`,
+              'Required can only be tightened (RFC 0002 S2): code compiled against the original view reads a non-null value.',
+            );
+          }
+          if (
+            value === true &&
+            !field.required &&
+            override.default === undefined &&
+            field.default === undefined
+          ) {
+            throw new InvalidExtensionError(
+              `${where}: fieldOverrides.${key} sets required without a default.`,
+              'Give the field a default in the same override (RFC 0002 S2), so existing create() calls keep working.',
+            );
+          }
+          Object.assign(changes, { required: value });
+          break;
+        }
+        case 'selectionAdd': {
+          const selectable = field as Field & {
+            selection?: readonly (readonly [string, string])[] | (() => readonly string[]);
+            extensible?: boolean;
+          };
+          if (
+            (field.kind !== 'selection' && field.kind !== 'state') ||
+            typeof selectable.selection === 'function'
+          ) {
+            throw new InvalidExtensionError(
+              `${where}: fieldOverrides.${key}.selectionAdd on a ${field.kind} field.`,
+              'selectionAdd applies to selection and state fields with a static map.',
+            );
+          }
+          if (selectable.extensible !== true) {
+            throw new InvalidExtensionError(
+              `${where}: '${key}' is not an extensible selection.`,
+              'The owner must declare the field with extensible: true (RFC 0002 S5); consumers then handle unknown values.',
+            );
+          }
+          const existing = selectable.selection ?? [];
+          const added = Object.entries(value as Record<string, string>).filter(
+            ([k]) => !existing.some(([e]) => e === k),
+          );
+          changes.selection = [...existing, ...added.map(([k, v]) => [k, v] as const)];
+          break;
+        }
+        default:
+          throw new InvalidExtensionError(
+            `${where}: fieldOverrides.${key}.${attr} is not an attribute an extension may change.`,
+            'Allowed: label, help, default, index, tracking, copy, groups, required (tighten only), selectionAdd (RFC 0002 S2–S6).',
+          );
+      }
+    }
+    draft.fields[key] = overrideField(field, changes);
+  }
+
+  for (const [key, fn] of Object.entries(ext.methods)) {
+    const layers = draft.methodLayers[key];
+    if (layers !== undefined) {
+      const origin = layers[0]?.module ?? draft.module;
+      conflict(
+        'method',
+        key,
+        origin,
+        reachable.has(origin)
+          ? 'Use overrides to wrap an existing method.'
+          : 'Rename one method, or make one module depend on the other and use overrides.',
+      );
+    }
+    draft.methods[key] = fn as AnyFn;
+    draft.methodLayers[key] = [{ module, kind: 'definition' }];
+  }
+
+  for (const [key, { kind, fn }] of Object.entries(ext.overrides)) {
+    const prev = draft.methods[key];
+    if (prev === undefined) {
+      throw new InvalidExtensionError(
+        `${where}: overrides names '${key}', which is not a method of '${ext.name}'.`,
+        `Methods: ${Object.keys(draft.methods).join(', ') || '(none)'}. Add new methods under \`methods\`.`,
+      );
+    }
+    draft.methods[key] = kind === 'replace' ? (fn as unknown as AnyFn) : compose(prev, fn);
+    draft.methodLayers[key] = [...(draft.methodLayers[key] ?? []), { module, kind }];
+  }
+
+  for (const [key, spec] of Object.entries(ext.constraints)) {
+    if (draft.constraints[key] !== undefined)
+      conflict('constraint', key, draft.module, 'Use a different constraint key.');
+    draft.constraints[key] = spec;
+  }
+  for (const [key, spec] of Object.entries(ext.sqlConstraints)) {
+    if (draft.sqlConstraints[key] !== undefined)
+      conflict(
+        'sqlConstraints',
+        key,
+        draft.module,
+        'Use a different key (prefix it with the module name).',
+      );
+    draft.sqlConstraints[key] = spec;
+  }
+  draft.indexes.push(...ext.indexes);
+  for (const key of ext.tracking) if (!draft.tracking.includes(key)) draft.tracking.push(key);
+  draft.extensions.push(module);
+}
+
+/** Rebuilds the final model from the draft through `defineModel`, so every model-level check applies to it. */
+function finalize(draft: Draft): RegisteredModel {
+  const def = draft.base.definition;
+  const model = defineModel(draft.base.name, {
+    ...def,
+    fields: draft.fields,
+    methods: draft.methods,
+    constraints: draft.constraints,
+    sqlConstraints: draft.sqlConstraints,
+    indexes: draft.indexes,
+    tracking: draft.tracking,
+  } as never) as unknown as AnyModel;
+  const fieldOrigins: Record<string, string> = {};
+  for (const key of Object.keys(model.fields))
+    fieldOrigins[key] = draft.fieldOrigins[key] ?? draft.module;
+  return {
+    model,
+    module: draft.module,
+    extensions: Object.freeze([...draft.extensions]),
+    fieldOrigins: Object.freeze(fieldOrigins),
+    methodLayers: Object.freeze(
+      Object.fromEntries(
+        Object.entries(draft.methodLayers).map(([k, v]) => [k, Object.freeze([...v])]),
+      ),
+    ),
+  };
+}
+
+// -------------------------------------------------------------------------------------------------- building
+
 /**
- * Builds the registry: collects and orders modules, registers models, and runs the checks that need every model:
- * relation targets exist and belong to a declared dependency, one2many inverses point back, `depends` paths resolve.
+ * Builds the registry: collects and orders modules, registers models, applies extensions in load order under the
+ * view-safety rules, and runs the checks that need every model: relation targets exist and belong to a declared
+ * dependency, one2many inverses point back, `depends` paths resolve.
  *
  * @throws {DuplicateModuleError} {DuplicateModelError} {UnknownModelError} {UndeclaredDependencyError}
- * {InvalidRelationError} {InvalidDependsPathError}
+ * {InvalidRelationError} {InvalidDependsPathError} {InvalidExtensionError} {ExtensionConflictError}
  */
-export function buildRegistry<const Mods extends readonly Module[]>(
+export function buildRegistry<const Mods extends readonly ModuleBase[]>(
   options: RegistryOptions<Mods>,
 ): Registry<Simplify<SchemaOfModules<Mods>>> {
   const modules = order(collect(options.modules));
-  const models = new Map<string, RegisteredModel>();
+  const closures = new Map(modules.map((m) => [m.name, closure(m)]));
+
+  const drafts = new Map<string, Draft>();
   for (const module of modules) {
     for (const model of module.models) {
-      const existing = models.get(model.name);
+      const existing = drafts.get(model.name);
       if (existing !== undefined)
         throw new DuplicateModelError(model.name, [existing.module, module.name]);
-      models.set(model.name, { model, module: module.name });
+      drafts.set(model.name, draftOf(model, module.name));
+    }
+  }
+  for (const module of modules) {
+    const reachable = closures.get(module.name) ?? new Set<string>();
+    for (const ext of module.extensions) {
+      const draft = drafts.get(ext.name);
+      if (draft === undefined)
+        throw new UnknownModelError(ext.name, `the extension in module '${module.name}'`);
+      if (!reachable.has(draft.module))
+        throw new UndeclaredDependencyError(module.name, ext.name, draft.module, 'an extension');
+      applyExtension(draft, ext, module.name, reachable);
     }
   }
 
-  const closures = new Map(modules.map((m) => [m.name, closure(m)]));
-  const resolve = (from: RegisteredModel, target: string, via: string): RegisteredModel => {
+  const models = new Map<string, RegisteredModel>();
+  for (const [name, draft] of drafts) models.set(name, finalize(draft));
+
+  const resolve = (fromModule: string, target: string, via: string): RegisteredModel => {
     const found = models.get(target);
     if (found === undefined) throw new UnknownModelError(target, via);
-    if (!closures.get(from.module)?.has(found.module)) {
-      throw new UndeclaredDependencyError(from.module, target, found.module, via);
-    }
+    if (!closures.get(fromModule)?.has(found.module))
+      throw new UndeclaredDependencyError(fromModule, target, found.module, via);
     return found;
   };
 
@@ -182,9 +491,10 @@ export function buildRegistry<const Mods extends readonly Module[]>(
     const { model } = registered;
     for (const [key, field] of Object.entries(model.fields)) {
       const where = `field '${key}' of model '${model.name}'`;
+      const fromModule = registered.fieldOrigins[key] ?? registered.module;
       const target = targetOf(field);
       if (target !== undefined) {
-        const other = resolve(registered, target, where);
+        const other = resolve(fromModule, target, where);
         if (field.kind === 'one2many') {
           const inverseKey = (field as unknown as { inverseField: string }).inverseField;
           const inverse = other.model.fields[inverseKey];
@@ -219,7 +529,7 @@ export function buildRegistry<const Mods extends readonly Module[]>(
                 'Only many2one, one2many and many2many fields can be followed by another segment.',
               );
             }
-            current = resolve(current, next, `the depends path '${path}' of ${where}`);
+            current = resolve(fromModule, next, `the depends path '${path}' of ${where}`);
           }
         });
       }
@@ -237,16 +547,25 @@ export function buildRegistry<const Mods extends readonly Module[]>(
       return found;
     },
     describe(name) {
-      const { model, module } = registry.get(name);
-      const base = model.describe();
-      const origin: Origin = { module };
+      const registered = registry.get(name);
+      const base = registered.model.describe();
       return {
         ...base,
-        origin,
+        origin: { module: registered.module },
+        extensions: registered.extensions,
         fields: Object.fromEntries(
-          Object.entries(base.fields).map(([key, field]) => [key, { ...field, origin }]),
+          Object.entries(base.fields).map(([key, field]) => [
+            key,
+            { ...field, origin: { module: registered.fieldOrigins[key] ?? registered.module } },
+          ]),
         ),
+        methodLayers: registered.methodLayers,
       };
+    },
+    explain(model, method) {
+      const layers = registry.get(model).methodLayers[method];
+      if (layers === undefined) throw new UnknownModelError(`${model}.${method}`, 'explain()');
+      return layers;
     },
   };
   return Object.freeze(registry);

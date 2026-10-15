@@ -184,10 +184,20 @@ export function createDriver(options: DriverOptions): Driver {
     },
   });
 
+  /**
+   * postgres.js infers an array parameter's type from its first element, so an array of booleans is sent as a scalar
+   * boolean (and a text array that the server resolves to boolean[] is serialized with the boolean serializer, giving
+   * 'f' for anything but the value true). Declaring boolean arrays as boolean[] (OID 1000) avoids both.
+   */
+  const typed = (params: readonly unknown[]): Params =>
+    params.map((p) =>
+      Array.isArray(p) && p.some((v) => typeof v === 'boolean') ? sql.typed(p, 1000) : p,
+    ) as Params;
+
   const run = async <R extends Row>(s: Sql, query: DriverQuery): Promise<readonly R[]> => {
     if (guard) guardParamsInText(query);
     try {
-      return [...(await s.unsafe<R[]>(query.text, query.params as Params, { prepare }))];
+      return [...(await s.unsafe<R[]>(query.text, typed(query.params), { prepare }))];
     } catch (e) {
       throw mapPostgresError(e);
     }
@@ -225,7 +235,7 @@ export function createDriver(options: DriverOptions): Driver {
         }
       }
       try {
-        const writable = await s.unsafe(query.text, query.params as Params).writable();
+        const writable = await s.unsafe(query.text, typed(query.params)).writable();
         await pipeline(Readable.from(withNewlines()), writable);
       } catch (e) {
         throw mapPostgresError(e);

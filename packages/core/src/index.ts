@@ -26,6 +26,7 @@ export {
   DuplicateModelError,
   DuplicateModuleError,
   EmptyMoneySumError,
+  ExtensionConflictError,
   FieldNotLoadedError,
   FlagNotAllowedError,
   IncompatibleUomCategoryError,
@@ -34,6 +35,7 @@ export {
   InvalidDecimalError,
   InvalidDependsPathError,
   InvalidDomainError,
+  InvalidExtensionError,
   InvalidFieldError,
   InvalidIdentityError,
   InvalidModelError,
@@ -68,6 +70,7 @@ export {
   type FieldBuilders,
   type FieldFlags,
   type FieldKind,
+  type FieldOverrideChanges,
   type FieldTypes,
   type FlagsOf,
   type FloatField,
@@ -168,9 +171,27 @@ export type {
   WriteValues,
 } from './recordset/types.js';
 export { createTableStatements } from './registry/ddl.js';
-export { defineModule, isModule, type Module, type ModuleDefinition } from './registry/module.js';
+export {
+  type AnyExtension,
+  type Extension,
+  type ExtensionDefinition,
+  extendModel,
+  type FieldOverride,
+  isExtension,
+  type OverrideFn,
+  type Replacement,
+  replace,
+} from './registry/extension.js';
+export {
+  defineModule,
+  isModule,
+  type Module,
+  type ModuleBase,
+  type ModuleDefinition,
+} from './registry/module.js';
 export {
   buildRegistry,
+  type MethodLayer,
   type Origin,
   type RegisteredModel,
   type Registry,

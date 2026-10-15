@@ -362,6 +362,15 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
   readonly methods: Ms;
+  /** Keys of the fields the model declared itself (implicit fields excluded); extensions add to these. */
+  readonly declaredFields: readonly string[];
+  /** The definition as given, so the registry can rebuild the model with extensions applied. */
+  readonly definition: ModelDefinition<
+    FieldsRecord,
+    MethodsRecord,
+    boolean,
+    CompanyScope | undefined
+  >;
   /** Plain, JSON-serializable metadata (RFC 0001 §9). */
   describe(): ModelDescription;
 }
@@ -836,6 +845,13 @@ export function defineModel<
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),
     methods: Object.freeze(methods),
+    declaredFields: Object.freeze(Object.keys(user)),
+    definition: Object.freeze({ ...definition }) as unknown as ModelDefinition<
+      FieldsRecord,
+      MethodsRecord,
+      boolean,
+      CompanyScope | undefined
+    >,
     describe(): ModelDescription {
       return describeModel(model as AnyModel);
     },

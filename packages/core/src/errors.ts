@@ -30,7 +30,9 @@ export type ShutroErrorCode =
   | 'MISSING_RECORD'
   | 'INVALID_DOMAIN'
   | 'NO_REGISTRY'
-  | 'VALIDATION';
+  | 'VALIDATION'
+  | 'INVALID_EXTENSION'
+  | 'EXTENSION_CONFLICT';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -315,6 +317,20 @@ export class ValidationError extends ShutroError {
     super('VALIDATION', `${model}: ${problem}`, hint);
     this.model = model;
     this.fields = Object.freeze([...fields]);
+  }
+}
+
+/** An extension that breaks a view-safety rule (RFC 0002 §7.5) or is malformed. */
+export class InvalidExtensionError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('INVALID_EXTENSION', problem, hint);
+  }
+}
+
+/** Two modules contribute the same field, method or constraint key (RFC 0002 §7.6). Never resolved silently. */
+export class ExtensionConflictError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('EXTENSION_CONFLICT', problem, hint);
   }
 }
 
