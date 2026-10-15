@@ -4,7 +4,7 @@
 ERP workloads: type-safe, secure by default, modular, multi-company, multi-currency, audit-ready and fast at scale.
 It is the data layer of the Kosh ERP framework.
 
-> **Status: alpha (0.x).** The engine is tested end to end against real PostgreSQL (550+ tests, an ERP demo with
+> **Status: alpha (0.x).** The engine is tested end to end against real PostgreSQL (580+ tests, an ERP demo with
 > partner, product, sale and invoice modules), but the API may still change between minor versions. Known gaps are
 > tracked in [`docs/feedback.md`](docs/feedback.md).
 
@@ -27,7 +27,11 @@ Requirements: Node.js ≥ 24, PostgreSQL ≥ 14.
 - **Translations** in JSONB with language fallback; **sequences**, including gapless ones; append-only **audit trail**.
 - **Security**: default-deny ACL, record rules compiled to SQL (following relations, e.g. "lines of my orders"),
   optional PostgreSQL row-level security, field-level security, encrypted fields with keys outside the database,
-  verified identities.
+  verified identities, administrator roles that need no grants, feature permissions, special per-user grants,
+  back-date permissions for transactions, and audited elevated methods.
+- **Reports**: `aggregate()` (grouped totals with rules applied, per-currency `Money`), `records.sum()`.
+- **Typed definitions**: `shutro generate` writes per-module bindings, so computes, checks, onchange handlers and
+  methods are typed with no casts.
 - **Migrations**: schema diff against the live catalog, versioned migration files, destructive-change guard.
 - **Tooling**: `shutro init | migrate | generate | inspect`, dev-mode query inspector with N+1 warnings, COPY bulk
   loads, partitioned tables, CI benchmarks.
@@ -64,6 +68,7 @@ Entry points: `shutro` (core), `shutro/sql`, `shutro/driver-pg`, `shutro/migrate
 - Guides: [`docs/guides/`](docs/guides/)
 - Design documents (RFCs): [`docs/rfcs/`](docs/rfcs/README.md)
 - A complete example: [`examples/erp-demo`](examples/erp-demo/README.md)
+- How it compares with Odoo's ORM, including where Odoo is ahead: [`docs/odoo-comparison.md`](docs/odoo-comparison.md)
 
 ## Development
 
