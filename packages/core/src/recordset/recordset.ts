@@ -562,14 +562,31 @@ export class RecordSetImpl {
     return new (recordClass(this.model))(this.env, this.registered, kept, this.#group, undefined);
   }
 
+  /** A `Currency` from a currency, a record reference or an id (loaded with the records' monetary fields). */
+  #currencyOf(
+    currency: Currency | { readonly id: number } | number | undefined,
+  ): Currency | undefined {
+    if (currency === undefined) return undefined;
+    if (typeof currency === 'object' && 'code' in currency) return currency;
+    const id = typeof currency === 'number' ? currency : currency.id;
+    const found = this.#loader.internals.cache.currencies.get(id);
+    if (found === undefined)
+      throw new FieldNotLoadedError(
+        this.model.name,
+        'currency',
+        `Currency ${id} is not loaded: pass a Currency, or sum records whose monetary fields are loaded in it.`,
+      );
+    return found;
+  }
+
   mapped(key: string): unknown[] {
     return [...this].map((r) => (r as unknown as Record<string, unknown>)[key]);
   }
 
-  sum(key: string, currency?: Currency): unknown {
+  sum(key: string, currency?: Currency | { readonly id: number } | number): unknown {
     const kind = this.model.fields[key]?.kind;
     const values = this.mapped(key).filter((v) => v !== null && v !== undefined);
-    if (kind === 'monetary') return Money.sum(values as Money[], currency);
+    if (kind === 'monetary') return Money.sum(values as Money[], this.#currencyOf(currency));
     if (kind === 'decimal')
       return values.reduce<DecimalJs>((total, v) => total.plus(v as DecimalJs), new DecimalJs(0));
     if (kind === 'integer' || kind === 'float')
@@ -866,6 +883,7 @@ function computeHost(loader: Loader): ComputeHost {
   return {
     internals: loader.internals,
     load: (model, ids, spec) => loadInto(loader, model, ids, spec),
+    valueObjects: (model, ids, fields) => ensureValueObjects(loader, model, ids, fields),
     values: (model, id, create) => valuesOf(loader.internals.cache, model, id, create),
     recordset: (model, ids) => recordsetOf(loader, model, ids),
   };

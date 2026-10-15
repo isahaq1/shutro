@@ -62,7 +62,7 @@ at the highest rank among its fields.
 ## Open
 
 ### #1 — Compute, constraint, onchange, transition and method bodies are untyped
-`dx` `types` · S2
+`dx` `types` · S2 · **fixed**: generated bindings export `compute` / `check` / `onchange` / `records` / `method` typed against the module's view; the demo's `modules/` has no casts (`docs/guides/generate.md`).
 
 Every function inside `defineModel` takes `unknown` and casts: `compute(records: unknown) { for (const l of records as
 ComputeRecords<'sale.order.line', { tax: ['rate'] }>) ... }`. The demo needs an `app/types.ts` with five aliases over
@@ -75,7 +75,7 @@ module's view, and `LoadedFrom<depends>` for compute records. **Acceptance:** th
 `modules/`.
 
 ### #2 — Inside a compute, computed fields read as `read | write`
-`types` · S2
+`types` · S2 · **fixed**: `compute(model, assigns, …)` makes only the assigned fields writable; other computed fields read with their read type.
 
 To make `o.amountTotal = x` legal, `ComputeRec` types computed keys as the union of read and write types
 (`Money | Decimal | string`). Reading one computed field from another compute (`taxAmount` reads `subtotal`) needs a
@@ -212,7 +212,7 @@ Deliberate (RFC 0008 §11.3: no stale values), but scripts trip on it: after `li
 the throw as an opt-in strict mode.
 
 ### #16 — Running the CLI on TypeScript sources needs a loader
-`dx` · S3
+`dx` · S3 · **fixed**: the CLI registers a `.js` → `.ts` resolve hook (`ts-sources.test.ts` spawns the built CLI).
 
 The CLI imports module files at runtime; `./x.js` specifiers between `.ts` files (the `nodenext` convention) fail under
 Node's type stripping. The demo uses `.ts` specifiers and `allowImportingTsExtensions` instead.
@@ -220,7 +220,7 @@ Node's type stripping. The demo uses `.ts` specifiers and `allowImportingTsExten
 **Proposal:** document one blessed setup, or have the CLI register a resolver for `.js → .ts`.
 
 ### #17 — Generated type-view goldens churn on unrelated changes
-`dx` · S4
+`dx` · S4 · **fixed**: the hash covers field types, origins and transitions only.
 
 The definitions hash covers the whole `describe()` output; adding metadata to `describe()` (encrypted, groups shape,
 checkCompany) changed every generated file three times. 
@@ -228,7 +228,7 @@ checkCompany) changed every generated file three times.
 **Proposal:** hash only what the generated types depend on.
 
 ### #18 — Transitions added by extensions are untyped
-`types` · S3
+`types` · S3 · **fixed**: the view's `<Model>Methods` interface lists every transition, extensions' included.
 
 `transitionsAdd: { hold, resume }` creates `order.hold()`, but no type carries it; callers cast.
 

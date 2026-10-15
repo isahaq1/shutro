@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { buildRegistry, isModule, type ModuleBase, type Registry } from '@shutro/core';
 import type { ShutroConfig } from '../config.js';
 import { ConfigError, ModuleSourceError } from '../errors.js';
+import { allowJsSpecifiersForTs } from '../resolve.js';
 import {
   type ModuleSource,
   outDirOf,
@@ -53,6 +54,7 @@ export async function loadSources(files: readonly string[]): Promise<Map<string,
         'Check `modules` in shutro.config.ts.',
       );
     }
+    allowJsSpecifiersForTs();
     const ns = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
     const found = Object.entries(ns).filter(([, value]) => isModule(value));
     if (found.length !== 1) {

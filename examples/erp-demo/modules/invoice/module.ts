@@ -2,20 +2,34 @@
  * invoice: customer invoices with gapless legal numbering on posting, amounts in the invoice currency and in the
  * company currency (dated rates), and invoicing from sales orders (an extension of sale.order).
  */
+import { defineGroup, defineSequence, type Id, toDecimal } from '@shutro/core';
+import { sale } from '../sale/module.ts';
 import {
-  defineGroup,
+  compute,
   defineModel,
   defineModule,
-  defineSequence,
   type Env,
   extendModel,
   f,
-  type Id,
-  Money,
-  toDecimal,
-} from '@shutro/core';
-import { type ComputeRecords, type Records, readId, readMoney } from '../../app/types.ts';
-import { sale } from '../sale/module.ts';
+  method,
+  records,
+} from './.shutro/bindings.ts';
+
+/** The three totals share one compute (computed together, at the rank of the last one). */
+const amounts = compute(
+  'account.move',
+  ['amountUntaxed', 'amountTax', 'amountTotal'],
+  ['lines.subtotal', 'lines.taxAmount'],
+  (moves) => {
+    for (const m of moves) {
+      const untaxed = m.lines.sum('subtotal', m.currency);
+      const tax = m.lines.sum('taxAmount', m.currency);
+      m.amountUntaxed = untaxed;
+      m.amountTax = tax;
+      m.amountTotal = untaxed.plus(tax);
+    }
+  },
+);
 
 const accounting = {
   'account.user': ['read', 'write', 'create'],
@@ -38,66 +52,47 @@ export const AccountMove = defineModel('account.move', {
     currency: f.many2one('res.currency', { required: true }),
     saleOrder: f.many2one('sale.order', { ondelete: 'set null' }),
     lines: f.one2many('account.move.line', 'move'),
-    amountUntaxed: f.monetary({
-      currency: 'currency',
-      store: true,
-      depends: ['lines.subtotal'],
-      compute: 'computeAmounts',
-    }),
-    amountTax: f.monetary({
-      currency: 'currency',
-      store: true,
-      depends: ['lines.taxAmount'],
-      compute: 'computeAmounts',
-    }),
-    amountTotal: f.monetary({
-      currency: 'currency',
-      store: true,
-      depends: ['amountUntaxed', 'amountTax'],
-      compute: 'computeAmounts',
-    }),
+    amountUntaxed: f.monetary({ currency: 'currency', store: true, ...amounts }),
+    amountTax: f.monetary({ currency: 'currency', store: true, ...amounts }),
+    amountTotal: f.monetary({ currency: 'currency', store: true, ...amounts }),
     companyCurrency: f.many2one('res.currency', {
       store: true,
-      depends: ['company.currency'],
-      compute(records: unknown): void {
-        for (const m of records as ComputeRecords<'account.move', { company: ['currency'] }>)
-          m.companyCurrency = m.company.currency.id;
-      },
+      ...compute('account.move', 'companyCurrency', ['company.currency'], (moves) => {
+        for (const m of moves) m.companyCurrency = m.company.currency.id;
+      }),
     }),
     /** The total in the company currency at the invoice date's rate. */
     amountTotalCompany: f.monetary({
       currency: 'companyCurrency',
       store: true,
-      depends: ['amountTotal', 'date', 'companyCurrency'],
-      async compute(records: unknown): Promise<void> {
-        const moves = records as ComputeRecords<'account.move'>;
-        // One rate lookup per (date, currency pair), not per invoice.
-        const groups = new Map<string, (typeof moves extends Iterable<infer R> ? R : never)[]>();
-        for (const m of moves) {
-          const key = `${m.date}|${m.currency.id}|${readId(m.companyCurrency)}`;
-          groups.set(key, [...(groups.get(key) ?? []), m]);
-        }
-        for (const group of groups.values()) {
-          const first = group[0];
-          const total = readMoney(first?.amountTotal);
-          const companyCurrency = readId(first?.companyCurrency);
-          if (first === undefined || total === null || companyCurrency === null) continue;
-          // PreparedRates.convert needs Currency objects; the target's comes from a one-off convert (docs/feedback.md #9).
-          const target = (
-            await moves.env.fx.convert(Money.zero(total.currency), companyCurrency, {
-              date: first.date,
-            })
-          ).to;
-          const rates = await moves.env.fx.prepare({
-            date: first.date,
-            currencies: [total.currency, target],
-          });
-          for (const m of group) {
-            const amount = readMoney(m.amountTotal);
-            m.amountTotalCompany = amount === null ? null : rates.convert(amount, target).money;
+      ...compute(
+        'account.move',
+        'amountTotalCompany',
+        ['amountTotal', 'date', 'company.currency'],
+        async (moves) => {
+          // One rate lookup per (date, company), not per invoice.
+          const all = [...moves];
+          const groups = new Map<string, typeof all>();
+          for (const m of all) {
+            const key = `${m.date}|${m.company.id}`;
+            groups.set(key, [...(groups.get(key) ?? []), m]);
           }
-        }
-      },
+          for (const group of groups.values()) {
+            const first = group[0];
+            if (first === undefined) continue;
+            const rates = await moves.env.fx.prepare({
+              date: first.date,
+              company: first.company.id,
+              currencies: group.map((m) => m.currency.id),
+            });
+            for (const m of group)
+              m.amountTotalCompany =
+                m.amountTotal === null
+                  ? null
+                  : rates.convert(m.amountTotal, rates.companyCurrency).money;
+          }
+        },
+      ),
     }),
     state: f.state({
       states: { draft: 'Draft', posted: 'Posted', cancel: 'Cancelled' },
@@ -106,37 +101,16 @@ export const AccountMove = defineModel('account.move', {
         post: {
           from: ['draft'],
           to: 'posted',
-          guard(records: unknown): unknown {
-            return (records as Records<'account.move'>).filter(
-              (m) => m.amountTotal === null || m.amountTotal.isZero(),
-            );
-          },
+          guard: records('account.move', (moves) =>
+            moves.filter((m) => m.amountTotal === null || m.amountTotal.isZero()),
+          ),
           message: 'An invoice needs a non-zero total to be posted.',
-          async before(records: unknown): Promise<void> {
-            await (records as Records<'account.move'>).assignNumber('name'); // gapless, per month
-          },
+          // Gapless, per month: numbered inside the posting transaction.
+          before: records('account.move', (moves) => moves.assignNumber('name')),
         },
         cancel: { from: ['draft', 'posted'], to: 'cancel' },
       },
     }),
-  },
-  methods: {
-    computeAmounts(records: unknown): void {
-      for (const m of records as ComputeRecords<
-        'account.move',
-        { lines: ['subtotal', 'taxAmount'] }
-      >) {
-        let untaxed = toDecimal(0);
-        let tax = toDecimal(0);
-        for (const l of m.lines) {
-          untaxed = untaxed.plus(l.subtotal?.amount ?? 0);
-          tax = tax.plus(l.taxAmount?.amount ?? 0);
-        }
-        m.amountUntaxed = untaxed;
-        m.amountTax = tax;
-        m.amountTotal = untaxed.plus(tax);
-      }
-    },
   },
 });
 
@@ -154,31 +128,24 @@ export const AccountMoveLine = defineModel('account.move.line', {
     tax: f.many2one('account.tax'),
     currency: f.many2one('res.currency', {
       store: true,
-      depends: ['move.currency'],
-      compute(records: unknown): void {
-        for (const l of records as ComputeRecords<'account.move.line', { move: ['currency'] }>) {
-          const move = l.move as typeof l.move | null; // drafts (docs/feedback.md #4)
-          l.currency = move === null ? null : move.currency.id;
-        }
-      },
+      ...compute('account.move.line', 'currency', ['move.currency'], (lines) => {
+        for (const l of lines) l.currency = l.move?.currency.id ?? null; // drafts have no move yet (#4)
+      }),
     }),
     subtotal: f.monetary({
       currency: 'currency',
       store: true,
-      depends: ['quantity', 'priceUnit'],
-      compute(records: unknown): void {
-        for (const l of records as ComputeRecords<'account.move.line'>)
-          l.subtotal = l.quantity.times(l.priceUnit);
-      },
+      ...compute('account.move.line', 'subtotal', ['quantity', 'priceUnit'], (lines) => {
+        for (const l of lines) l.subtotal = l.quantity.times(l.priceUnit);
+      }),
     }),
     taxAmount: f.monetary({
       currency: 'currency',
       store: true,
-      depends: ['subtotal', 'tax.rate'],
-      compute(records: unknown): void {
-        for (const l of records as ComputeRecords<'account.move.line', { tax: ['rate'] }>)
-          l.taxAmount = (readMoney(l.subtotal)?.amount ?? toDecimal(0)).times(l.tax?.rate ?? 0);
-      },
+      ...compute('account.move.line', 'taxAmount', ['subtotal', 'tax.rate'], (lines) => {
+        for (const l of lines)
+          l.taxAmount = (l.subtotal?.amount ?? toDecimal(0)).times(l.tax?.rate ?? 0);
+      }),
     }),
   },
 });
@@ -189,48 +156,48 @@ export const SaleOrderInvoicing = extendModel('sale.order', {
   fields: {
     invoices: f.one2many('account.move', 'saleOrder'),
     invoiceCount: f.integer({
-      depends: ['invoices'],
-      compute(records: unknown): void {
-        for (const o of records as ComputeRecords<'sale.order', { invoices: true }>)
-          o.invoiceCount = o.invoices.length;
-      },
+      ...compute('sale.order', 'invoiceCount', ['invoices'], (orders) => {
+        for (const o of orders) o.invoiceCount = o.invoices.length;
+      }),
     }),
   },
   methods: {
     /** Draft invoices for confirmed orders, one per order, with the order's lines. Returns the invoice ids. */
-    async createInvoices(
-      this: unknown,
-      options: { readonly date?: string } = {},
-    ): Promise<readonly Id<'account.move'>[]> {
-      const orders = await (this as Records<'sale.order'>).load({
-        lines: ['product', 'name', 'quantity', 'priceUnit', 'tax'],
-      });
-      const notConfirmed = orders.filter((o) => o.state !== 'sale');
-      if (notConfirmed.length > 0)
-        throw new Error(
-          `Only confirmed orders can be invoiced (${notConfirmed.map((o) => o.name).join(', ')}).`,
+    createInvoices: method(
+      'sale.order',
+      async function (
+        options: { readonly date?: string } = {},
+      ): Promise<readonly Id<'account.move'>[]> {
+        const orders = await this.load({
+          lines: ['product', 'name', 'quantity', 'priceUnit', 'tax'],
+        });
+        const notConfirmed = orders.filter((o) => o.state !== 'sale');
+        if (notConfirmed.length > 0)
+          throw new Error(
+            `Only confirmed orders can be invoiced (${notConfirmed.map((o) => o.name).join(', ')}).`,
+          );
+        const { env } = orders;
+        const created = await env.model('account.move').create(
+          orders.map((o) => ({
+            partner: o.partner.id,
+            currency: o.currency.id,
+            company: o.company.id,
+            saleOrder: o.id,
+            date: options.date ?? env.today(),
+            lines: {
+              create: [...o.lines].map((l) => ({
+                product: l.product.id,
+                name: l.name,
+                quantity: l.quantity,
+                priceUnit: l.priceUnit,
+                tax: l.tax === null ? null : l.tax.id,
+              })),
+            },
+          })),
         );
-      const { env } = orders;
-      const created = await env.model('account.move').create(
-        orders.map((o) => ({
-          partner: o.partner.id,
-          currency: o.currency.id,
-          company: o.company.id,
-          saleOrder: o.id as Id<'sale.order'>,
-          date: options.date ?? env.today(),
-          lines: {
-            create: [...o.lines].map((l) => ({
-              product: l.product.id,
-              name: l.name,
-              quantity: l.quantity,
-              priceUnit: l.priceUnit,
-              tax: l.tax === null ? null : l.tax.id,
-            })),
-          },
-        })),
-      );
-      return created.ids;
-    },
+        return created.ids;
+      },
+    ),
   },
 });
 
