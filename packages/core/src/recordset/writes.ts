@@ -5,9 +5,10 @@
  */
 
 import { compile, type SqlFragment, sql } from '@shutro/sql';
+import { Decimal as DecimalJs } from 'decimal.js';
 import type { ScopeInternals } from '../env/env.js';
 import { SYSTEM_UID } from '../env/identity.js';
-import { MissingRecordError } from '../errors.js';
+import { MissingRecordError, StaleRecordError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { targetOf } from '../registry/registry.js';
@@ -185,6 +186,71 @@ async function createDelegates(
     });
   }
   return out as Row[];
+}
+
+function same(field: Field, current: unknown, expected: unknown): boolean {
+  if (expected === null || expected === undefined) return current === null || current === undefined;
+  if (current === null || current === undefined) return false;
+  if (expected instanceof Date || current instanceof Date)
+    return (
+      new Date(current as string | Date).getTime() === new Date(expected as string | Date).getTime()
+    );
+  if (field.kind === 'many2one') {
+    const id =
+      typeof expected === 'object' && 'id' in (expected as object)
+        ? (expected as { id: unknown }).id
+        : expected;
+    return Number(current) === Number(id);
+  }
+  if (DecimalJs.isDecimal(current) || field.kind === 'decimal' || field.kind === 'monetary') {
+    const amount =
+      typeof expected === 'object' && 'amount' in (expected as object)
+        ? (expected as { amount: unknown }).amount
+        : expected;
+    return new DecimalJs(String(current)).equals(new DecimalJs(String(amount)));
+  }
+  return JSON.stringify(current) === JSON.stringify(expected);
+}
+
+/**
+ * Compare-and-set (RFC 0018 §7.1): locks the records and checks their stored values against `expect` before a write.
+ * @throws {StaleRecordError} for records whose values differ (someone else saved first).
+ */
+export async function assertExpected(
+  internals: ScopeInternals,
+  model: AnyModel,
+  ids: readonly number[],
+  expect: Readonly<Record<string, unknown>>,
+): Promise<void> {
+  const keys = Object.keys(expect);
+  if (keys.length === 0 || ids.length === 0) return;
+  for (const key of keys)
+    if (model.columns[key] === undefined || model.fields[key]?.companyDependent === true)
+      fail(
+        model,
+        [key],
+        `'${key}' cannot be expected: it is not a stored column.`,
+        'Expect stored fields, e.g. { updatedAt }.',
+      );
+  assertFields(internals, model, keys, 'read');
+  await internals.flush(model.name); // this transaction's own pending writes count
+  const rows = await internals.query<Record<string, unknown>>(
+    compile(
+      sql`SELECT ${sql.id('id')}, ${sql.join(keys.map((k) => sql.id(model.columns[k] ?? '')))} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${sql.array([...ids], 'bigint')}) FOR UPDATE`,
+    ),
+  );
+  const stale = new Set<string>();
+  const records: number[] = [];
+  for (const row of rows) {
+    const changed = keys.filter(
+      (k) => !same(model.fields[k] as Field, row[model.columns[k] ?? ''], expect[k]),
+    );
+    if (changed.length > 0) {
+      records.push(Number(row['id']));
+      for (const k of changed) stale.add(k);
+    }
+  }
+  if (records.length > 0) throw new StaleRecordError(model.name, records, [...stale]);
 }
 
 /** The `created_by` / `updated_by` value: `NULL` for the system ({@link SYSTEM_UID}, bootstrap scopes). */

@@ -149,3 +149,17 @@ released.
 
 Computed-field recomputation, constraints, onchange, record rules on flush, sequences (a required `sequence` field
 currently has to be given explicitly), and `write()` on pending x2many sets.
+
+## Lost-update protection
+
+Forms read a record, users edit it, and two users can save the same record. Pass what you read as `expect`:
+
+```ts
+const invoice = (await env.model('account.move').browse([id]).load()).first();
+// ... the user edits ...
+await invoice.write({ amount: '95.00' }, { expect: { updatedAt: invoice.updatedAt } });
+```
+
+The records are locked and compared before the write; if someone saved first, the write is a `StaleRecordError`
+(records and fields named) instead of silently overwriting their change. Any stored fields can be expected
+(`{ state: 'draft' }` as a guard). Of two racing saves from the same read, exactly one wins.

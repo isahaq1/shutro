@@ -53,6 +53,7 @@ import { assignNumbers } from './sequences.js';
 import { availableTransitions, runTransition } from './transitions.js';
 import { companyValue } from './values.js';
 import {
+  assertExpected,
   createRecords,
   flushDirty,
   unlinkRecords,
@@ -642,8 +643,14 @@ export class RecordSetImpl {
   }
 
   /** Updates the records in the cache now; flushed at the next flush point. */
-  async write(values: Readonly<Record<string, unknown>>): Promise<void> {
-    await writeRecords(this.#host(), this.model, await this.resolveIds(), values);
+  async write(
+    values: Readonly<Record<string, unknown>>,
+    options: { readonly expect?: Readonly<Record<string, unknown>> } = {},
+  ): Promise<void> {
+    const ids = await this.resolveIds();
+    if (options.expect !== undefined)
+      await assertExpected(this.#loader.internals, this.model, ids, options.expect);
+    await writeRecords(this.#host(), this.model, ids, values);
   }
 
   /** Deletes the records now. */

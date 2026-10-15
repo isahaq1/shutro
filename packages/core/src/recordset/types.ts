@@ -216,7 +216,16 @@ export interface RecordSetApi<S, M extends ModelName<S>, L> {
     currency?: Currency | IdOnly<'res.currency'> | number,
   ): SumOf<FieldsOf<S, M>[K]>;
   /** Updates the records in the cache now; the database is updated at the next flush point (search, raw SQL, savepoint end, commit). */
-  write(values: WriteValues<S, M>): Promise<void>;
+  write(
+    values: WriteValues<S, M>,
+    options?: {
+      /**
+       * Compare-and-set (RFC 0018 §7.1): the stored values these records must still have, typically the
+       * `updatedAt` read with them. Checked under a row lock. @throws {StaleRecordError} when someone saved first.
+       */
+      readonly expect?: { readonly [K in Keys<S, M>]?: unknown };
+    },
+  ): Promise<void>;
   /** Deletes the records now (`ON DELETE` rules apply). */
   unlink(): Promise<void>;
   /** Plain JSON rows (ids for relations, `Money` / `Quantity` as objects, dates as ISO strings). */
