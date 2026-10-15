@@ -14,9 +14,11 @@ import {
   type Perm,
   type RulePerm,
   resolvePlaceholders,
+  SecurityDefinitionError,
 } from '@shutro/security';
 import { compile, type SqlFragment, sql } from '@shutro/sql';
 import type { ScopeInternals } from '../env/env.js';
+import { calendarDateIn } from '../env/time.js';
 import { AccessError, MissingRecordError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
@@ -28,8 +30,10 @@ const HINT =
 
 /** True when the environment may perform `perm` on the model (ACL, RFC 0014 §7.2). */
 export function canAccess(internals: ScopeInternals, model: AnyModel, perm: Perm): boolean {
-  if (internals.env.su || !internals.registry.security.enforce) return true;
+  if (internals.env.su || internals.env.administrator || !internals.registry.security.enforce)
+    return true;
   if (allowed(model.access, internals.env.groups, perm)) return true;
+  if (internals.env.grants.has(`${model.name}:${perm}`)) return true; // a special permission of this user
   if (internals.registry.security.mode !== 'warn') return false;
   internals.registry.security.denied(
     `[enforce: 'warn'] ${perm} access to ${model.name} would be denied for groups ${[...internals.env.groups].join(', ') || '(none)'}: add it to the model's access.`,
@@ -46,6 +50,70 @@ export function assertAccess(internals: ScopeInternals, model: AnyModel, perm: P
   });
 }
 
+/**
+ * True when the environment has the feature permission `code` (RFC 0014 §7.9): one of its groups grants it, or it
+ * is an administrator / superuser. @throws {SecurityDefinitionError} for a code no module declares (a typo).
+ */
+export function hasPermission(internals: ScopeInternals, code: string): boolean {
+  const permission = internals.registry.security.permissions.get(code);
+  if (permission === undefined)
+    throw new SecurityDefinitionError(
+      `The permission '${code}' is not declared by any installed module.`,
+      'Declare it with definePermission() in a module, or fix the code.',
+    );
+  const { env } = internals;
+  if (env.su || env.administrator || !internals.registry.security.enforce) return true;
+  if (permission.groups.some((g) => env.groups.has(g)) || env.grants.has(code)) return true;
+  if (internals.registry.security.mode !== 'warn') return false;
+  internals.registry.security.denied(
+    `[enforce: 'warn'] permission '${code}' would be denied for groups ${[...env.groups].join(', ') || '(none)'}.`,
+  );
+  return true;
+}
+
+/** @throws {AccessError} unless {@link hasPermission}. */
+export function assertPermission(internals: ScopeInternals, code: string): void {
+  if (hasPermission(internals, code)) return;
+  const groups = internals.registry.security.permissions.get(code)?.groups ?? [];
+  throw new AccessError('permission', code, {
+    problem: `the permission '${code}' is denied (granted to ${groups.join(', ') || 'no group'}).`,
+    hint: HINT,
+  });
+}
+
+/** `date` shifted by `days` (`'YYYY-MM-DD'`). */
+function addDays(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, (d ?? 1) + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * Back-dated entries (RFC 0014 §7.9): `dates` (values of the model's `backdate.field`) before today minus the grace
+ * days need the model's back-date permission. @throws {AccessError}
+ */
+export function assertBackdate(
+  internals: ScopeInternals,
+  model: AnyModel,
+  dates: Iterable<unknown>,
+): void {
+  const spec = model.backdate;
+  if (spec === undefined) return;
+  const { env } = internals;
+  const earliest = addDays(env.today(), -(spec.graceDays ?? 0));
+  const early = [...dates]
+    .map((v) =>
+      v instanceof Date ? calendarDateIn(v, env.tz) : typeof v === 'string' ? v.slice(0, 10) : null,
+    )
+    .filter((d): d is string => d !== null && d < earliest)
+    .sort();
+  if (early.length === 0 || hasPermission(internals, spec.permission)) return;
+  throw new AccessError(model.name, 'backdate', {
+    field: spec.field,
+    problem: `${model.name} entries dated before ${earliest} (here ${early[0]}) need the permission '${spec.permission}'.`,
+    hint: 'Use a current date, or ask an administrator for the back-date permission (a role or a special grant).',
+  });
+}
+
 /** True when the field may be read / written by the environment. */
 export function canField(
   internals: ScopeInternals,
@@ -54,7 +122,13 @@ export function canField(
   kind: 'read' | 'write',
 ): boolean {
   const field = model.fields[key];
-  if (field === undefined || internals.env.su || !internals.registry.security.enforce) return true;
+  if (
+    field === undefined ||
+    internals.env.su ||
+    internals.env.administrator ||
+    !internals.registry.security.enforce
+  )
+    return true;
   if (fieldAllowed(field.groups, internals.env.groups, kind)) return true;
   if (internals.registry.security.mode !== 'warn') return false;
   internals.registry.security.denied(
@@ -145,7 +219,7 @@ export function ruleConditions(
   perm: RulePerm,
 ): SqlFragment[] {
   const { env } = internals;
-  if (env.su || !internals.registry.security.enforce) return [];
+  if (env.su || env.administrator || !internals.registry.security.enforce) return [];
   const { globals, groupRules, hasGroupRules } = applicableRules(model.rules, env.groups, perm);
   const placeholders = { uid: env.uid, companyId: env.companyId, companyIds: env.companyIds };
   const out: SqlFragment[] = [];

@@ -9,7 +9,7 @@ import type { AnyModel } from '../model/model.js';
 import { trackChange } from './audit.js';
 import type { ComputeHost } from './compute.js';
 import { failingIds } from './constraints.js';
-import { assertAccess, assertRecords } from './security.js';
+import { assertAccess, assertPermission, assertRecords } from './security.js';
 
 type Hook = (this: unknown, records: unknown) => unknown;
 
@@ -35,6 +35,8 @@ export async function runTransition(
   const field = model.fields[key] as Field & StateFieldRuntime;
   const transition = field.transitions[name];
   if (transition === undefined) throw new InvalidTransitionError(model.name, name, [], []);
+  const requires = (transition as { readonly requires?: string }).requires;
+  if (requires !== undefined) assertPermission(internals, requires);
 
   await host.load(model, ids, { fields: new Set(['id', key]), relations: new Map() });
   const stateOf = (id: number): string => String(host.values(model.name, id)?.get(key));

@@ -32,7 +32,13 @@ import {
   modelRef,
   type RecordCache,
 } from '../recordset/recordset.js';
-import { assertAccess, canAccess, canField } from '../recordset/security.js';
+import {
+  assertAccess,
+  assertPermission,
+  canAccess,
+  canField,
+  hasPermission,
+} from '../recordset/security.js';
 import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ModelName, ModelRef } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
@@ -257,10 +263,17 @@ export class Env<S = unknown> {
   readonly tz: string;
   /** Superuser mode: only inside {@link asSuperuser}. */
   readonly su: boolean;
+  /**
+   * The user is in an administrator group (`defineGroup({ administrator: true })`): every ACL, record rule, field
+   * group and permission passes, without grants (RFC 0014 §7.9). Company scoping still applies.
+   */
+  readonly administrator: boolean;
   /** Reason for a job or superuser scope, when given. */
   readonly reason: string | undefined;
   /** The user's security groups, closed over `implies` (RFC 0014 §7.1). */
   readonly groups: ReadonlySet<string>;
+  /** Special permissions of this user on top of the roles (`'account.backdate'`, `'account.move:unlink'`). */
+  readonly grants: ReadonlySet<string>;
   /** @internal Encryption keys. */
   readonly keys: KeyRing | undefined;
   readonly flags: Flags;
@@ -290,6 +303,9 @@ export class Env<S = unknown> {
       runtime.registry === undefined
         ? new Set(identity.groups)
         : runtime.registry.security.closure(identity.groups);
+    this.administrator =
+      runtime.registry !== undefined && runtime.registry.security.isAdministrator(this.groups);
+    this.grants = new Set(identity.grants);
     this.keys = runtime.keys;
     this.tz = identity.tz;
     this.su = identity.su;
@@ -328,6 +344,10 @@ export class Env<S = unknown> {
     /** @throws {AccessError} */
     check(model: ModelName<S>, perm: Perm): void;
     canField(model: ModelName<S>, field: string, kind: 'read' | 'write'): boolean;
+    /** The feature permission `code` (`definePermission`): granted by a group, or administrator. */
+    has(code: string): boolean;
+    /** @throws {AccessError} unless {@link has}. */
+    require(code: string): void;
   } {
     const scope = internalsOf(this as unknown as Env);
     return {
@@ -335,6 +355,10 @@ export class Env<S = unknown> {
       check: (model, perm) => assertAccess(scope, scope.registry.get(model).model, perm),
       canField: (model, field, kind) =>
         canField(scope, scope.registry.get(model).model, field, kind),
+      has: (code) => hasPermission(scope, code),
+      require: (code) => {
+        assertPermission(scope, code);
+      },
     };
   }
 
@@ -496,7 +520,7 @@ export class Env<S = unknown> {
     if (this.#runtime.registry !== undefined)
       trackSuperuser(internalsOf(su as unknown as Env), reason);
     // RLS policies read shutro.su: the setting is scoped to the call (RFC 0014 §7.5).
-    const wasSu = this.su;
+    const wasSu = this.su || this.administrator; // administrators already pass RLS (shutro.su = 1)
     if (!wasSu) await this.#query(compile(sqlTag`SELECT set_config(${'shutro.su'}, ${'1'}, true)`));
     try {
       return await fn(su);
@@ -539,6 +563,7 @@ export class Env<S = unknown> {
         tz: this.tz,
         reason: this.reason,
         groups: [...this.groups],
+        grants: [...this.grants],
         su: this.su,
         flags: this.flags,
         readOnly: this.readOnly,
@@ -794,6 +819,8 @@ export interface BootstrapOptions {
 export interface VerifiedIdentity {
   readonly companies: readonly number[];
   readonly groups: readonly string[];
+  /** The user's special permissions (see `Identity.grants`). */
+  readonly grants?: readonly string[];
 }
 
 /** A Shutro instance: one driver, one registry, one AsyncLocalStorage. No global state (`CLAUDE.md`). */
@@ -895,7 +922,19 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
             );
           }
         }
-        identity = { ...identity, groups: Object.freeze([...(asked ?? verified.groups)]) };
+        const askedGrants = runOptions.grants;
+        const extraGrants = (askedGrants ?? []).filter((g) => !(verified.grants ?? []).includes(g));
+        if (extraGrants.length > 0) {
+          throw new InvalidIdentityError(
+            `User ${identity.uid} does not have the grant(s) ${extraGrants.join(', ')}.`,
+            'Pass only grants the user has (or omit grants to use the loaded ones).',
+          );
+        }
+        identity = {
+          ...identity,
+          groups: Object.freeze([...(asked ?? verified.groups)]),
+          grants: Object.freeze([...(askedGrants ?? verified.grants ?? [])]),
+        };
       }
       return execute(identity, runOptions, fn);
     },
@@ -917,6 +956,7 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
         tz: 'UTC',
         reason,
         groups: Object.freeze([]),
+        grants: Object.freeze([]),
       };
       return execute(identity, { user: 1, company: 1 }, (env) => env.asSuperuser({ reason }, fn));
     },
@@ -938,6 +978,9 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
         options.registry === undefined
           ? new Set(identity.groups)
           : (options.registry as Registry).security.closure(identity.groups);
+      const administrator =
+        options.registry !== undefined &&
+        (options.registry as Registry).security.isAdministrator(groups);
       const maxAttempts = runOptions.retry === false ? 1 : attempts;
       for (let attempt = 1; ; attempt++) {
         let scope: Scope | undefined;
@@ -951,7 +994,8 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 'shutro.company_id': String(identity.companyId),
                 'shutro.company_ids': `{${identity.companyIds.join(',')}}`,
                 'shutro.groups': [...groups].join(','),
-                'shutro.su': '0',
+                // Administrators pass every RLS policy, like superuser scopes (RFC 0014 §7.9).
+                'shutro.su': administrator ? '1' : '0',
                 timezone: 'UTC',
               },
             },

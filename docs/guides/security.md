@@ -55,6 +55,62 @@ export const SaleOrder = defineModel('sale.order', {
 - **Superuser**: `env.asSuperuser({ reason }, fn)` skips all three for `fn` (audited, RFC 0013). The engine's own
   loads (computes, constraints, audit snapshots) carry no rules; what the user *sees* is governed at the boundary.
 
+## Administrators
+
+```ts
+defineGroup({ code: 'base.admin', label: 'Administrator', implies: ['base.user'], administrator: true });
+```
+
+Members of an administrator group, directly or through `implies`, pass every check on every model and feature of
+every module: ACL, record rules, field groups, feature permissions, transition requirements and back-date rules. No
+model needs to grant them anything. In RLS mode their transactions set `shutro.su = 1`, so the database policies let
+them through too. Company scoping still applies: an administrator works in the companies of the session. Other users
+stay default-deny. Unlike `env.asSuperuser({ reason })` (an audited elevation for one call), an administrator acts as
+themselves and their changes are audited under their own user.
+
+## Roles, feature permissions and special grants
+
+Roles are groups (`defineGroup`), and models grant operations to them (`access`). Features that are not a model
+operation (an app, a menu, a button, an approval) are **permissions**, declared by modules and granted to roles:
+
+```ts
+defineModule({
+  name: 'sale',
+  permissions: [definePermission({ code: 'sale.discount_approve', label: 'Approve discounts', groups: ['sale.manager'] })],
+  // ...
+});
+
+env.access.has('sale.discount_approve');      // boolean, for menus and buttons
+env.access.require('sale.discount_approve');  // AccessError unless granted
+// on a transition: approve: { from: ['draft'], to: 'approved', requires: 'sale.discount_approve' }
+```
+
+**Special grants** give one user something extra without a new role: a permission code, or a model operation
+(`'<model>:<read|write|create|unlink|export|import>'`).
+
+```ts
+await shutro.run({ user: 7, company: 1, groups: ['account.user'], grants: ['account.backdate', 'account.move:unlink'] }, fn);
+// With an identity loader, grants come from the user record, and a session cannot claim more:
+createShutro({ driver, registry, identity: async (uid) => ({ companies, groups, grants }) });
+```
+
+Unknown permission codes are definition errors (a misspelled `requires` fails at `buildRegistry`, a misspelled
+`env.access.has()` throws).
+
+## Back-dated entries
+
+```ts
+defineModel('account.move', {
+  backdate: { field: 'date', permission: 'account.backdate', graceDays: 0 },
+  // ...
+});
+```
+
+Creating a record, or changing its date, to a day before today (in the user's time zone) minus `graceDays` needs the
+permission: from a role, a special grant, or administrator rights. Checked on `create`, nested x2many creates,
+bulk `copy()` and `write`; editing other fields of an old entry is not back-dating. Raw SQL is outside the ORM (use
+RLS or a database trigger if other services write directly).
+
 ## Development mode: `enforce: 'warn'`
 
 ```ts

@@ -13,7 +13,13 @@ import type { AnyModel } from '../model/model.js';
 import { targetOf } from '../registry/registry.js';
 import { trackChange, trackedKeys, trackSnapshot } from './audit.js';
 import { junctionTable } from './relations.js';
-import { assertAccess, assertFields, assertRecords, storedValue } from './security.js';
+import {
+  assertAccess,
+  assertBackdate,
+  assertFields,
+  assertRecords,
+  storedValue,
+} from './security.js';
 import { fillSequences, UNNUMBERED } from './sequences.js';
 import { arrayType, fail, normalize, type TranslationContext, valueRef } from './values.js';
 
@@ -197,6 +203,12 @@ export async function createRecords(
       );
     return { stored, commands };
   });
+  if (model.backdate !== undefined)
+    assertBackdate(
+      internals,
+      model,
+      prepared.map((p) => p.stored.get(model.backdate?.field ?? '')),
+    );
 
   await fillSequences(internals, model, prepared);
 
@@ -350,6 +362,8 @@ export async function writeRecords(
   if (ids.length === 0) return;
   assertAccess(internals, model, 'write');
   assertFields(internals, model, Object.keys(values), 'write');
+  if (model.backdate !== undefined && model.backdate.field in values)
+    assertBackdate(internals, model, [values[model.backdate.field]]);
   await assertRecords(internals, model, ids, 'write');
   // Money / Quantity checks need the sibling currency / uom values; a moved record needs its old parent.
   const needed = new Set<string>();

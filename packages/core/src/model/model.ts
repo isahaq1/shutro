@@ -188,6 +188,16 @@ export interface ConstraintSpec {
   readonly check: (records: never) => unknown;
   readonly message: string | ((failing: never) => string);
 }
+/** The `backdate` option of a model. */
+export interface BackdateSpec<K extends string = string> {
+  /** The document date (`date` or `datetime`). */
+  readonly field: K;
+  /** The feature permission (`definePermission`) that allows earlier dates. */
+  readonly permission: string;
+  /** Days before today still allowed without the permission (default 0: today and later). */
+  readonly graceDays?: number;
+}
+
 /** An onchange handler (RFC 0009 §7.3): receives the draft and the environment. Typed by the recordset layer. */
 export type OnchangeFn = (draft: never, env: never) => void | Promise<void>;
 
@@ -212,6 +222,11 @@ export interface ModelDefinition<
   readonly companyScoped?: C;
   /** Fields whose changes are tracked in the audit trail. */
   readonly tracking?: readonly ModelKeys<Fs, A, C>[];
+  /**
+   * Back-dated entries need a permission (RFC 0014 §7.9): creating a record, or changing `field`, to a date before
+   * today (in the user's time zone) minus `graceDays` requires the feature permission `permission`.
+   */
+  readonly backdate?: BackdateSpec<ModelKeys<Fs, A, C>>;
   readonly indexes?: readonly IndexSpec<ModelKeys<Fs, A, C>>[];
   readonly sqlConstraints?: Readonly<
     Record<string, SqlUniqueConstraint<ModelKeys<Fs, A, C>> | SqlCheckConstraint>
@@ -408,6 +423,7 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly archivable: boolean;
   readonly companyScoped: CompanyScope | undefined;
   readonly tracking: readonly (keyof Fs & string)[];
+  readonly backdate: BackdateSpec<keyof Fs & string> | undefined;
   readonly indexes: readonly ResolvedIndex<keyof Fs & string>[];
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
@@ -764,6 +780,21 @@ export function defineModel<
       'Choose a char/text field (or leave it to `name`).',
     );
   }
+  const backdate = definition.backdate;
+  if (backdate !== undefined) {
+    const kind = fields[backdate.field]?.kind;
+    if (kind !== 'date' && kind !== 'datetime')
+      fail(
+        name,
+        `backdate.field '${backdate.field}' is not a date or datetime field.`,
+        'Point it at the document date, e.g. backdate: { field: "date", permission: "account.backdate" }.',
+      );
+    if (
+      backdate.graceDays !== undefined &&
+      (!Number.isInteger(backdate.graceDays) || backdate.graceDays < 0)
+    )
+      fail(name, 'backdate.graceDays must be a non-negative integer.', 'Use 0 for "today only".');
+  }
   const tracking = [...(definition.tracking ?? [])];
   for (const key of tracking)
     if (!has(key))
@@ -1020,6 +1051,7 @@ export function defineModel<
         ? undefined
         : Object.freeze({ ...definition.companyScoped }),
     tracking: Object.freeze(tracking),
+    backdate: backdate === undefined ? undefined : Object.freeze({ ...backdate }),
     indexes: Object.freeze(indexes),
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),

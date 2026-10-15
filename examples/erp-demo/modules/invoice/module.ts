@@ -2,7 +2,7 @@
  * invoice: customer invoices with gapless legal numbering on posting, amounts in the invoice currency and in the
  * company currency (dated rates), and invoicing from sales orders (an extension of sale.order).
  */
-import { defineGroup, defineSequence, type Id, toDecimal } from '@shutro/core';
+import { defineGroup, definePermission, defineSequence, type Id, toDecimal } from '@shutro/core';
 import { sale } from '../sale/module.ts';
 import {
   compute,
@@ -39,6 +39,8 @@ const accounting = {
 export const AccountMove = defineModel('account.move', {
   companyScoped: { required: true },
   order: ['date desc', 'id desc'],
+  // Invoices dated before today need 'account.backdate' (accounting managers, a special grant, or administrators).
+  backdate: { field: 'date', permission: 'account.backdate' },
   tracking: ['partner', 'amountTotal'],
   access: accounting,
   fields: {
@@ -216,6 +218,13 @@ export const invoice = defineModule({
       code: 'account.manager',
       label: 'Accounting manager',
       implies: ['account.user'],
+    }),
+  ],
+  permissions: [
+    definePermission({
+      code: 'account.backdate',
+      label: 'Back-dated invoices',
+      groups: ['account.manager'],
     }),
   ],
   sequences: [

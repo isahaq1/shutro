@@ -145,6 +145,18 @@ themselves compile without them (no rule→rule recursion through cycles such as
 (field groups, target read ACL). An optional `identity` loader on `createShutro` verifies each run's user, companies
 and groups (feedback #6).
 
+### 7.9 Administrators, feature permissions, special grants, back-dating (amendment)
+
+- `defineGroup({ administrator: true })`: members (closure over `implies`) bypass ACL, rules, field groups,
+  permissions and back-date rules on every model; RLS sees `shutro.su = 1` for their transactions. Company scoping
+  and `checkCompany` stay. Their changes are audited as themselves (not as superuser scopes).
+- `definePermission({ code, label, groups })` in modules; `env.access.has / require`; `requires` on transitions,
+  validated at registry build.
+- `grants` on the identity (and `VerifiedIdentity`): permission codes and `model:perm` operations for one user.
+  A loader's grants bound what a session may claim.
+- `backdate: { field, permission, graceDays }` on models: dates before `today - graceDays` need the permission, on
+  create (including COPY and nested creates) and on writes of the field.
+
 ## 8. Type-level guarantees
 
 `access` perms and rule perms are literal unions; `env.access.can(model, perm)` takes model names of the schema;
