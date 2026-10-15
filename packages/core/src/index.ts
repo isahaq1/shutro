@@ -76,6 +76,7 @@ export {
   type FloatField,
   f,
   type HtmlOptions,
+  type IdField,
   type IndexKind,
   type InverseFn,
   isField,
@@ -100,6 +101,7 @@ export {
   type Transition,
   type X2ManyOptions,
 } from './model/field.js';
+export type * as F from './model/generated.js';
 export { asId, type Id, type X2ManyCommands } from './model/id.js';
 export {
   type ActiveField,

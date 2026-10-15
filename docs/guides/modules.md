@@ -101,4 +101,5 @@ on upgrade. See the [migrations guide](./migrations.md).
 
 ## Not yet
 
-Mixins, module-contributed flags, and the generated per-module type views (`shutro generate`) are still to come.
+Mixins and module-contributed flags are still to come. Generated per-module type views exist: see the
+[generate guide](./generate.md).

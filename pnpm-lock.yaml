@@ -59,7 +59,11 @@ importers:
 
   packages/audit: {}
 
-  packages/cli: {}
+  packages/cli:
+    dependencies:
+      '@shutro/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core:
     dependencies:

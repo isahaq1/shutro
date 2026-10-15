@@ -277,11 +277,20 @@ type NoOptions = Record<never, never>;
 type IsTrue<O, K extends string> = O extends Record<K, true> ? true : false;
 type Present<O, K extends string> = O extends Record<K, Defined | null> ? true : false;
 
+/**
+ * Resolves a mapped object into a fresh structural type. Without it, two `FlagsOf` instantiations with the same
+ * result but different option objects are not *identical* to TypeScript (only mutually assignable), which breaks
+ * `toEqualTypeOf` between generated views (`F.*`, RFC 0002 §7.7) and declared fields.
+ */
+type Resolved<T> = { [K in keyof T]: T[K] };
+
 /** Derives the phantom flags from a builder's options and its kind defaults. */
 export type FlagsOf<
   O,
   D extends { required?: true; readonly?: true; hasDefault?: true } = NoOptions,
-> = {
+> = Resolved<RawFlagsOf<O, D>>;
+
+type RawFlagsOf<O, D extends { required?: true; readonly?: true; hasDefault?: true }> = {
   readonly required: IsTrue<O, 'required'> extends true
     ? true
     : D extends { required: true }
