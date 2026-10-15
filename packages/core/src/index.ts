@@ -33,6 +33,7 @@ export {
   ConcurrentUpdateError,
   ConstraintError,
   ConstraintViolationError,
+  CrossCompanyError,
   CurrencyMismatchError,
   DivisionByZeroError,
   DuplicateModelError,
@@ -55,6 +56,7 @@ export {
   InvalidRelationError,
   InvalidTransitionError,
   InvalidUomError,
+  MissingRateError,
   MissingRecordError,
   NoEnvironmentError,
   NonIntegerNumberError,
@@ -162,6 +164,7 @@ export {
   sameCurrency,
 } from './money/currency.js';
 export { Decimal, type DecimalInput, toDecimal } from './money/decimal.js';
+export type { Conversion, ConvertOptions, Fx, PreparedRates } from './money/fx.js';
 export { Money, type MoneyJson } from './money/money.js';
 export { defineUom, Quantity, type Uom, type UomInput } from './money/quantity.js';
 export type { RoundingMethod } from './money/rounding.js';

@@ -608,6 +608,19 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
           }
         }
       }
+      if (
+        field.kind === 'many2one' &&
+        (field as { checkCompany?: boolean }).checkCompany === true
+      ) {
+        const targetName = targetOf(field) ?? '';
+        const targetModel = resolve(fromModule, targetName, where).model;
+        if (targetModel.companyScoped === undefined) {
+          throw new InvalidRelationError(
+            `${where} has checkCompany, but '${targetName}' is not companyScoped.`,
+            'checkCompany compares the companies of both records: make the target companyScoped, or drop the option.',
+          );
+        }
+      }
       for (const path of field.depends) {
         let current = registered;
         const segments = path.split('.');
