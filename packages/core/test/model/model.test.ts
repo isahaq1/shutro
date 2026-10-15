@@ -259,7 +259,7 @@ describe('defineModel', () => {
       column: null,
     });
     expect(d.fields['displayName']?.compute).toBe('inline');
-    expect(d.methods).toEqual(['computeAmounts']);
+    expect(d.methods).toEqual(['computeAmounts', 'confirm', 'cancel']); // transitions are methods (RFC 0010)
     expect(d.sqlConstraints.map((c) => c.name)).toEqual([
       'sale_order_name_unique_per_company',
       'sale_order_positive_total',

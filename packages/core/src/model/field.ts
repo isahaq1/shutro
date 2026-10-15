@@ -154,14 +154,29 @@ export interface SelectionOptions<V extends string> extends CommonOptions<V> {
   /** Let other modules add values (RFC 0002 S5). Consumers must then handle unknown options. */
   readonly extensible?: boolean;
 }
-/** A state transition. */
+/** Events of a state: run once per batch when records enter / leave it (RFC 0010 §7.2). */
+export interface StateHooks {
+  readonly onEnter?: (records: never) => unknown;
+  readonly onExit?: (records: never) => unknown;
+}
+/** A state with a label and optional events. */
+export interface StateSpec extends StateHooks {
+  readonly label: string;
+}
+/** A state transition: source states, target, optional guard and events (RFC 0010 §7.1). */
 export interface Transition<S extends string> {
   readonly from: readonly S[];
   readonly to: S;
+  /** Returns the records that may not transition (a recordset, records or ids); empty means go. */
+  readonly guard?: (records: never) => unknown;
+  /** User-facing message when the guard rejects records. */
+  readonly message?: string;
+  readonly before?: (records: never) => unknown;
+  readonly after?: (records: never) => unknown;
 }
 /** Options of `f.state`. */
 export interface StateOptions<
-  S extends Record<string, string>,
+  S extends Record<string, string | StateSpec>,
   T extends Record<string, Transition<keyof S & string>>,
 > {
   readonly states: S;
@@ -235,6 +250,8 @@ export interface StateField<
   readonly selection: readonly (readonly [string, string])[];
   readonly initial: S;
   readonly transitions: T;
+  /** Events per state (RFC 0010 §7.2). */
+  readonly stateHooks: Readonly<Record<string, StateHooks>>;
   readonly extensible: boolean;
 }
 /** `f.json` descriptor. */
@@ -364,6 +381,15 @@ function assertIdentifier(name: string, what: string): void {
     throw new InvalidFieldError(
       `${JSON.stringify(name)} is not a valid ${what}.`,
       'Use lower-case snake_case (a-z, 0-9, _), starting with a letter or underscore.',
+    );
+  }
+}
+
+function assertHook(where: string, name: string, fn: unknown): void {
+  if (fn !== undefined && typeof fn !== 'function') {
+    throw new InvalidFieldError(
+      `${where}: ${name} is not a function.`,
+      `Pass ${name}: (records) => { ... }.`,
     );
   }
 }
@@ -739,7 +765,7 @@ export const f = {
    * @example f.state({ states: { draft: 'Quotation', sale: 'Sales Order' }, initial: 'draft', transitions: { confirm: { from: ['draft'], to: 'sale' } } })
    */
   state<
-    const S extends Record<string, string>,
+    const S extends Record<string, string | StateSpec>,
     const T extends Record<string, Transition<keyof S & string>>,
   >(
     options: StateOptions<S, T>,
@@ -762,9 +788,24 @@ export const f = {
         'Pass states: { draft: "Draft", ... }.',
       );
     const names = new Set<string>();
-    for (const [key] of states) {
+    const stateHooks: Record<string, StateHooks> = {};
+    for (const [key, spec] of states) {
       assertIdentifier(key, 'state name');
       names.add(key);
+      if (typeof spec !== 'string') {
+        if (typeof spec?.label !== 'string')
+          throw new InvalidFieldError(
+            `State '${key}' has no label.`,
+            "Use 'Label' or { label: 'Label', onEnter, onExit }.",
+          );
+        assertHook(`State '${key}'`, 'onEnter', spec.onEnter);
+        assertHook(`State '${key}'`, 'onExit', spec.onExit);
+        if (spec.onEnter !== undefined || spec.onExit !== undefined)
+          stateHooks[key] = {
+            ...(spec.onEnter === undefined ? {} : { onEnter: spec.onEnter }),
+            ...(spec.onExit === undefined ? {} : { onExit: spec.onExit }),
+          };
+      }
     }
     if (!names.has(options.initial)) {
       throw new InvalidFieldError(
@@ -787,6 +828,14 @@ export const f = {
             `Use one of: ${[...names].join(', ')}.`,
           );
       }
+      assertHook(`Transition '${name}'`, 'guard', t.guard);
+      assertHook(`Transition '${name}'`, 'before', t.before);
+      assertHook(`Transition '${name}'`, 'after', t.after);
+      if (t.message !== undefined && typeof t.message !== 'string')
+        throw new InvalidFieldError(
+          `Transition '${name}': message is not a string.`,
+          'Give the message shown when the guard rejects records.',
+        );
     }
     const base = normalize(
       {
@@ -801,9 +850,12 @@ export const f = {
       kind: 'state',
       pgType: 'text',
       ...base,
-      selection: Object.freeze(states.map(([k, v]) => Object.freeze([k, v] as const))),
+      selection: Object.freeze(
+        states.map(([k, v]) => Object.freeze([k, typeof v === 'string' ? v : v.label] as const)),
+      ),
       initial: options.initial,
       transitions: Object.freeze(options.transitions),
+      stateHooks: Object.freeze(stateHooks),
       extensible: options.extensible ?? false,
     }) as StateField<
       keyof S & string,
@@ -947,6 +999,9 @@ export interface FieldOverrideChanges {
   readonly required?: boolean;
   /** Replaces the selection list (used by `selectionAdd` after validation). */
   readonly selection?: readonly (readonly [string, string])[];
+  /** State additions (RFC 0010 §7.4). */
+  readonly transitions?: Readonly<Record<string, Transition<string>>>;
+  readonly stateHooks?: Readonly<Record<string, StateHooks>>;
 }
 
 /** @internal Returns a new descriptor with `changes` applied; the registry validates them first. */

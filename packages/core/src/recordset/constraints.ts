@@ -9,7 +9,7 @@ import type { AnyModel, ResolvedConstraint } from '../model/model.js';
 import type { ComputeHost, ComputeSpec } from './compute.js';
 
 /** Ids out of what a `check` returned: a recordset, an array of records or ids, or nothing. */
-function failingIds(result: unknown): number[] {
+export function failingIds(result: unknown): number[] {
   if (result === undefined || result === null || result === false) return [];
   const ids = (result as { ids?: unknown }).ids;
   if (Array.isArray(ids)) return ids.map(Number);

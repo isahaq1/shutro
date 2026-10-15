@@ -31,6 +31,7 @@ import {
   runOnchange,
 } from './onchange.js';
 import { junctionTable } from './relations.js';
+import { availableTransitions, runTransition } from './transitions.js';
 import {
   createRecords,
   flushDirty,
@@ -503,7 +504,7 @@ export class RecordSetImpl {
 
   filter(fn: (record: never, index: number) => boolean): RecordSetImpl {
     const kept = [...this].filter((r, i) => fn(r as never, i)).map((r) => r.ids[0] as number);
-    return new RecordSetImpl(this.env, this.registered, kept, this.#group, undefined);
+    return new (recordClass(this.model))(this.env, this.registered, kept, this.#group, undefined);
   }
 
   mapped(key: string): unknown[] {
@@ -527,11 +528,23 @@ export class RecordSetImpl {
           relations: new Map([[k, nested]]),
         });
       }
-      return new RecordSetImpl(this.env, this.registered, mine, { ids: all }, undefined);
+      return new (recordClass(this.model))(
+        this.env,
+        this.registered,
+        mine,
+        { ids: all },
+        undefined,
+      );
     }
     const group = this.#group?.ids ?? this.ids;
     await loadInto(loader, this.model, group, normalized);
-    return new RecordSetImpl(this.env, this.registered, this.ids, this.#group, undefined);
+    return new (recordClass(this.model))(
+      this.env,
+      this.registered,
+      this.ids,
+      this.#group,
+      undefined,
+    );
   }
 
   #host(): WriteHost {
@@ -566,6 +579,22 @@ export class RecordSetImpl {
     return this.ids;
   }
 
+  /** @internal Runs a transition of state field `key` on these records (RFC 0010 §7.2). */
+  async transition(key: string, name: string): Promise<void> {
+    await runTransition(computeHost(this.#loader), this.model, await this.resolveIds(), key, name);
+  }
+
+  /** Transition names the current state allows (singleton, state loaded). Defaults to the model's state field. */
+  transitions(key?: string): string[] {
+    const stateKey =
+      key ??
+      Object.entries(this.model.fields)
+        .filter(([, f]) => f.kind === 'state')
+        .map(([k]) => k)[0];
+    if (stateKey === undefined) return [];
+    return availableTransitions(this.model, stateKey, this.fieldValue(stateKey));
+  }
+
   /** @internal Assigns a computed field of a singleton from inside its compute (RFC 0008 §7.5). */
   assign(key: string, value: unknown): void {
     assignComputed(computeHost(this.#loader), this.model, this.id, key, value);
@@ -588,7 +617,7 @@ export class RecordSetImpl {
       const children = values?.get(key) as number[] | undefined;
       const group = this.#group?.ids ?? [id];
       if (children === undefined) {
-        return new RecordSetImpl(this.env, target, undefined, undefined, {
+        return new (recordClass(target.model))(this.env, target, undefined, undefined, {
           parentModel: this.model,
           key,
           own: [id],
@@ -598,7 +627,13 @@ export class RecordSetImpl {
       const groupChildren = group.flatMap(
         (p) => (valuesOf(cache, this.modelName, p)?.get(key) as number[] | undefined) ?? [],
       );
-      return new RecordSetImpl(this.env, target, children, { ids: groupChildren }, undefined);
+      return new (recordClass(target.model))(
+        this.env,
+        target,
+        children,
+        { ids: groupChildren },
+        undefined,
+      );
     }
     if (values === undefined || !values.has(key)) {
       const hint = field.computed
@@ -678,6 +713,14 @@ function recordClass(model: AnyModel): typeof RecordSetImpl {
         enumerable: true,
       });
     }
+    // Model methods (declared and generated transitions) are callable on every recordset of the model.
+    for (const [name, fn] of Object.entries(model.methods))
+      Object.defineProperty(Ctor.prototype, name, {
+        value: fn,
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      });
     prototypes.set(model, Ctor);
   }
   return Ctor;
@@ -761,7 +804,7 @@ export function modelRef(
     modelName: name,
     async create(rows: readonly Readonly<Record<string, unknown>>[]): Promise<RecordSetImpl> {
       const ids = await createRecords(writeHost(loader), model, rows);
-      return new RecordSetImpl(env, registered, ids, { ids }, undefined);
+      return new (recordClass(model))(env, registered, ids, { ids }, undefined);
     },
     async search(
       query: {
@@ -790,10 +833,10 @@ export function modelRef(
       );
       const ids = rows.map((row) => hydrate(model, row, wanted, internals.cache));
       await ensureValueObjects(loader, model, ids, fields);
-      return new RecordSetImpl(env, registered, ids, { ids }, undefined);
+      return new (recordClass(model))(env, registered, ids, { ids }, undefined);
     },
     browse(ids: readonly number[]): RecordSetImpl {
-      return new RecordSetImpl(env, registered, [...ids], { ids: [...ids] }, undefined);
+      return new (recordClass(model))(env, registered, [...ids], { ids: [...ids] }, undefined);
     },
     onchange: (input) => runOnchange(onchangeHost(loader), model, input),
   };

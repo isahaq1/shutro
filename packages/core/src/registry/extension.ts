@@ -3,7 +3,13 @@
  * plain data; the registry applies them in load order and enforces the view-safety rules.
  */
 import { InvalidExtensionError } from '../errors.js';
-import { type Field, type IndexKind, isField } from '../model/field.js';
+import {
+  type Field,
+  type IndexKind,
+  isField,
+  type StateSpec,
+  type Transition,
+} from '../model/field.js';
 import {
   type ConstraintSpec,
   type FieldsRecord,
@@ -51,6 +57,10 @@ export interface FieldOverride {
   readonly required?: boolean;
   /** New values for an `extensible` selection or state. */
   readonly selectionAdd?: Readonly<Record<string, string>>;
+  /** New states of an `extensible` state field (RFC 0010 §7.4). */
+  readonly statesAdd?: Readonly<Record<string, string | StateSpec>>;
+  /** New transitions of an `extensible` state field; existing ones are never changed. */
+  readonly transitionsAdd?: Readonly<Record<string, Transition<string>>>;
 }
 
 /** The argument of {@link extendModel} after the model name. */

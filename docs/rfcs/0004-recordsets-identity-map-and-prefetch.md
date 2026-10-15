@@ -496,3 +496,10 @@ RFC 0008 lands §7.4 "dependent stored computes are marked for recompute", §7.5
 and the compute assignment protocol. Two runtime fixes came with it: an x2many sub-spec is now loaded for children
 whose list was cached by a command (`fetchX2Many` calls `fetchMissing` for every child), and `fetchMissing` always
 ensures the currency / unit value objects, even when every column was already cached.
+
+## Implementation notes (2026-10-15, methods on recordsets)
+
+With RFC 0010, model methods (declared ones and generated transitions) are installed on the per-model record class and
+typed on recordsets: `RecordSet<S, M, L>` is `RecordSetApi<S, M, L> & MethodsOf<S, M>`. Every recordset is now created
+through that class, so `orders.confirm()` works on search results, loaded sets and singletons alike (§7.5 "methods get
+`this: RecordSet`").

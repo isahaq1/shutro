@@ -29,6 +29,36 @@ export type MethodsRecord = Readonly<Record<string, (...args: never[]) => unknow
 type NoMethods = Record<never, never>;
 type NoFields = Record<never, never>;
 
+/** Generated transition methods of the state fields in `Fs` (RFC 0010 §7.1). */
+export type TransitionMethods<Fs> = {
+  readonly [K in keyof Fs as Fs[K] extends { readonly transitions: infer T }
+    ? keyof T & string
+    : never]: () => Promise<void>;
+};
+
+const TRANSITION = Symbol.for('shutro.transition');
+/** The state field and transition a generated (or wrapped) method runs, if it is one (RFC 0010 §7.1). */
+export function transitionOf(
+  fn: unknown,
+): { readonly field: string; readonly name: string } | undefined {
+  return typeof fn === 'function'
+    ? ((
+        fn as unknown as Record<
+          symbol,
+          { readonly field: string; readonly name: string } | undefined
+        >
+      )[TRANSITION] ?? undefined)
+    : undefined;
+}
+/** @internal Marks `fn` as running transition `name` of `field`. */
+export function markTransition<F>(fn: F, field: string, name: string): F {
+  Object.defineProperty(fn, TRANSITION, {
+    value: Object.freeze({ field, name }),
+    enumerable: false,
+  });
+  return fn;
+}
+
 /** `companyScoped` option: adds a `company` many2one. Nullable means "shared across companies". */
 export interface CompanyScope {
   readonly required: boolean;
@@ -531,7 +561,7 @@ export function defineModel<
   definition: ModelDefinition<Fs, Ms, A, C> & {
     readonly fields: FieldRules<NoInfer<Fs>, NoInfer<Ms>>;
   },
-): Model<N, ModelFields<N, Fs, A, C>, Ms> {
+): Model<N, ModelFields<N, Fs, A, C>, Ms & TransitionMethods<Fs>> {
   if (typeof name !== 'string' || !MODEL_NAME.test(name)) {
     throw new InvalidModelError(
       String(name),
@@ -712,6 +742,38 @@ export function defineModel<
     if (!has(key))
       fail(name, `tracking refers to unknown field '${key}'.`, 'List existing field keys.');
 
+  // --- transitions become methods (RFC 0010 §7.1)
+  for (const [key, field] of Object.entries(fields)) {
+    if (field.kind !== 'state') continue;
+    const transitions = (field as unknown as { transitions: Record<string, unknown> }).transitions;
+    for (const tname of Object.keys(transitions)) {
+      const existing = methods[tname];
+      if (existing !== undefined && transitionOf(existing) === undefined)
+        fail(
+          name,
+          `transition '${tname}' of state field '${key}' clashes with method '${tname}'.`,
+          'A transition is already a method: remove the declared one, or wrap it with overrides in an extension.',
+        );
+      if (RESERVED_KEYS.includes(tname))
+        fail(
+          name,
+          `transition '${tname}' is a reserved name.`,
+          'Rename the transition; it would shadow the recordset API.',
+        );
+      if (existing === undefined)
+        methods[tname] = markTransition(
+          function transition(this: unknown): Promise<void> {
+            return (this as { transition(k: string, n: string): Promise<void> }).transition(
+              key,
+              tname,
+            );
+          },
+          key,
+          tname,
+        );
+    }
+  }
+
   // --- SQL constraints
   const sqlConstraints: ResolvedSqlConstraint<string>[] = Object.entries(
     definition.sqlConstraints ?? {},
@@ -880,7 +942,7 @@ export function defineModel<
   Object.freeze(model);
   models.add(model);
   void keys;
-  return model as unknown as Model<N, ModelFields<N, Fs, A, C>, Ms>;
+  return model as unknown as Model<N, ModelFields<N, Fs, A, C>, Ms & TransitionMethods<Fs>>;
 }
 
 // ----------------------------------------------------------------------------------------------------- describe
@@ -948,7 +1010,14 @@ function describeField(
       Record<string, { readonly from: readonly string[]; readonly to: string }>
     >;
     extra['transitions'] = Object.fromEntries(
-      Object.entries(transitions).map(([k, t]) => [k, { from: [...t.from], to: t.to }]),
+      Object.entries(transitions).map(([k, t]) => [
+        k,
+        {
+          from: [...t.from],
+          to: t.to,
+          guarded: typeof (t as { guard?: unknown }).guard === 'function',
+        },
+      ]),
     );
   }
   return { ...base, ...extra };

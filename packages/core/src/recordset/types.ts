@@ -178,7 +178,7 @@ export interface PendingSet<S, M extends ModelName<S>> {
 }
 
 /** An ordered, immutable set of records of one model, bound to an environment (RFC 0004). */
-export interface RecordSet<S, M extends ModelName<S>, L> {
+export interface RecordSetApi<S, M extends ModelName<S>, L> {
   readonly env: Env<S>;
   readonly modelName: M;
   readonly ids: readonly Id<M>[];
@@ -206,8 +206,17 @@ export interface RecordSet<S, M extends ModelName<S>, L> {
   unlink(): Promise<void>;
   /** Plain JSON rows (ids for relations, `Money` / `Quantity` as objects, dates as ISO strings). */
   read<const K extends readonly LoadedKeys<L>[]>(keys: K): PlainRow<S, M, K[number]>[];
+  /** Transition names the current state allows (singleton with its state loaded; RFC 0010 §7.3). */
+  transitions(): readonly string[];
   toJSON(): readonly Id<M>[];
 }
+
+/** The model's methods (declared ones and generated transitions), callable on recordsets. */
+export type MethodsOf<S, M extends ModelName<S>> = S[M] extends { readonly methods: infer Ms }
+  ? Ms
+  : NonNullable<unknown>;
+/** An ordered, immutable set of records of one model, with the model's methods (RFC 0004, RFC 0010 §7.6). */
+export type RecordSet<S, M extends ModelName<S>, L> = RecordSetApi<S, M, L> & MethodsOf<S, M>;
 
 // --------------------------------------------------------------------------------------------------- search
 
