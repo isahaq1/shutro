@@ -177,7 +177,7 @@ await shutro.run({ user, company }, async (env) => {
 
 ### Phase 2 — Schema & modules
 - [ ] Schema diff + migrations
-- [ ] Module registry, dependency ordering, model extension
+- [x] Module registry, dependency ordering, model extension (mixins and module flags pending)
 - [ ] Type generation (`shutro generate`)
 
 ### Phase 3 — ERP engine

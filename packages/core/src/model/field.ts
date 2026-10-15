@@ -925,3 +925,24 @@ export function withDefaultLabel<F extends Field>(field: F, label: string): F {
   if (field.label !== undefined) return field;
   return make({ ...field, label });
 }
+
+/** Attributes an extension may change on an existing field (RFC 0002 §7.5 S2–S4). */
+export interface FieldOverrideChanges {
+  readonly label?: string;
+  readonly help?: string;
+  readonly default?: unknown;
+  readonly index?: IndexKind;
+  readonly tracking?: boolean;
+  readonly copy?: boolean;
+  readonly groups?: readonly string[];
+  readonly required?: boolean;
+  /** Replaces the selection list (used by `selectionAdd` after validation). */
+  readonly selection?: readonly (readonly [string, string])[];
+}
+
+/** @internal Returns a new descriptor with `changes` applied; the registry validates them first. */
+export function overrideField<F extends Field>(field: F, changes: FieldOverrideChanges): F {
+  const next: Record<string, unknown> = { ...(field as object) };
+  for (const [key, value] of Object.entries(changes)) if (value !== undefined) next[key] = value;
+  return make(next) as F;
+}

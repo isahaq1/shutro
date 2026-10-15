@@ -188,3 +188,11 @@ Where the implementation refines this RFC:
    because Biome can't express path-scoped call bans.
 5. **The param-in-text guard** (§7.3) rejects a query when a string parameter of 8+ characters also appears in its text.
    It's on unless `NODE_ENV=production`, and can be turned off with `checkParamsInText: false`.
+
+## Implementation notes (2026-10-15, array parameters)
+
+postgres.js infers an array parameter's type from its first element and sends a JS boolean array as a *scalar*
+boolean; and when the server resolves a parameter to `boolean` / `boolean[]` (from a cast), postgres.js serializes the
+value with its boolean serializer, which yields `'f'` for anything but the JS value `true`, so binding booleans as text
+silently stores `false`. The driver therefore declares any array containing booleans as `boolean[]` (OID 1000). Dates
+inside arrays are bound as ISO strings by the ORM for the same inference reason (RFC 0004 notes).

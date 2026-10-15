@@ -296,3 +296,20 @@ describe('direct-only features', () => {
     await lax.end();
   });
 });
+
+describe('boolean array parameters', () => {
+  test('arrays of booleans are declared as boolean[] (postgres.js would infer a scalar)', async () => {
+    const db = createDriver({ url: pg.url, max: 1 });
+    const rows = await db.query<{ v: boolean }>(
+      compile(sql`SELECT unnest(${[true, false, true]}) AS v`),
+    );
+    expect(rows.map((r) => r.v)).toEqual([true, false, true]);
+    const [hit] = await db.query<{ v: boolean }>(compile(sql`SELECT true = ANY(${[true]}) AS v`));
+    expect(hit?.v).toBe(true);
+    const [cast] = await db.query<{ v: boolean[] }>(
+      compile(sql`SELECT ${sql.array([false, true], 'boolean')} AS v`),
+    );
+    expect(cast?.v).toEqual([false, true]);
+    await db.end();
+  });
+});

@@ -1,10 +1,12 @@
 /**
  * `defineModule()` (RFC 0002 §7.1): a named, versioned unit that depends on other modules (by object, so a
- * dependency cycle can't even be written) and owns models. The module type carries its models and dependencies, so
- * a registry built from modules knows every model it contains (until `shutro generate` emits the same view).
+ * dependency cycle can't even be written), owns models and extends models of its dependencies. The module type
+ * carries its models, extensions and dependencies, so a registry built from modules knows every model it contains
+ * (until `shutro generate` emits the same view).
  */
 import { DuplicateModelError, InvalidModuleError } from '../errors.js';
 import { type AnyModel, humanize, isModel } from '../model/model.js';
+import { type AnyExtension, isExtension } from './extension.js';
 
 /** A module without the type parameters that carry its models and dependencies. */
 export interface ModuleBase {
@@ -13,21 +15,25 @@ export interface ModuleBase {
   readonly label: string;
   readonly depends: readonly ModuleBase[];
   readonly models: readonly AnyModel[];
+  readonly extensions: readonly AnyExtension[];
 }
 
-/** A module as `defineModule` returns it; `Ms` and `Deps` carry the model types for the registry's schema view. */
+/** A module as `defineModule` returns it; the type parameters carry the model types for the registry's schema view. */
 export interface Module<
   Ms extends readonly AnyModel[] = readonly AnyModel[],
   Deps extends readonly ModuleBase[] = readonly ModuleBase[],
+  Exts extends readonly AnyExtension[] = readonly AnyExtension[],
 > extends ModuleBase {
   readonly depends: Deps;
   readonly models: Ms;
+  readonly extensions: Exts;
 }
 
 /** The argument of {@link defineModule}. */
 export interface ModuleDefinition<
   Ms extends readonly AnyModel[],
   Deps extends readonly ModuleBase[],
+  Exts extends readonly AnyExtension[],
 > {
   /** Unique, snake_case, stable (stored in the database for migrations). */
   readonly name: string;
@@ -39,6 +45,8 @@ export interface ModuleDefinition<
   readonly depends?: Deps;
   /** Models this module owns. */
   readonly models: Ms;
+  /** Extensions of models owned by (transitive) dependencies. */
+  readonly extensions?: Exts;
 }
 
 const MODULE_NAME = /^[a-z][a-z0-9_]*$/;
@@ -56,15 +64,16 @@ export function isModule(value: unknown): value is Module {
  *
  * @example
  * ```ts
- * export default defineModule({ name: 'sale_stock', depends: [sale, stock], models: [SaleStockPicking] });
+ * export default defineModule({ name: 'sale_stock', depends: [sale, stock], models: [], extensions: [SaleOrderStock] });
  * ```
- * @throws {InvalidModuleError} for a bad name or version, or `depends` / `models` entries that aren't modules / models.
+ * @throws {InvalidModuleError} for a bad name or version, or `depends` / `models` / `extensions` entries of the wrong kind.
  * @throws {DuplicateModelError} when two models in the list share a name.
  */
 export function defineModule<
   const Ms extends readonly AnyModel[],
   const Deps extends readonly ModuleBase[] = readonly [],
->(definition: ModuleDefinition<Ms, Deps>): Module<Ms, Deps> {
+  const Exts extends readonly AnyExtension[] = readonly [],
+>(definition: ModuleDefinition<Ms, Deps, Exts>): Module<Ms, Deps, Exts> {
   const { name } = definition;
   if (typeof name !== 'string' || !MODULE_NAME.test(name)) {
     throw new InvalidModuleError(
@@ -90,21 +99,35 @@ export function defineModule<
   });
   const seen = new Set<string>();
   definition.models.forEach((model, i) => {
-    if (!isModel(model)) {
+    if (!isModel(model))
       throw new InvalidModuleError(
         `Module '${name}' models[${i}] is not a model.`,
         'Pass the result of defineModel().',
       );
-    }
     if (seen.has(model.name)) throw new DuplicateModelError(model.name, [name, name]);
     seen.add(model.name);
   });
-  const module: Module<Ms, Deps> = Object.freeze({
+  const extensions = (definition.extensions ?? []) as Exts;
+  extensions.forEach((ext, i) => {
+    if (!isExtension(ext))
+      throw new InvalidModuleError(
+        `Module '${name}' extensions[${i}] is not an extension.`,
+        'Pass the result of extendModel().',
+      );
+    if (seen.has(ext.name)) {
+      throw new InvalidModuleError(
+        `Module '${name}' both defines and extends '${ext.name}'.`,
+        'Put the extension content into the model definition instead.',
+      );
+    }
+  });
+  const module: Module<Ms, Deps, Exts> = Object.freeze({
     name,
     version,
     label: definition.label ?? humanize(name),
     depends: Object.freeze([...depends]) as unknown as Deps,
     models: Object.freeze([...definition.models]) as unknown as Ms,
+    extensions: Object.freeze([...extensions]) as unknown as Exts,
   });
   modules.add(module);
   return module;

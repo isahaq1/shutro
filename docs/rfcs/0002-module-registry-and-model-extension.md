@@ -648,3 +648,25 @@ Resolved on 2026-10-14. The original questions are kept below for context.
    extensions.
 5. **Second half (not yet):** `extensions`, `fieldOverrides`, `overrides` with `next`, `replace()`, mixins, module
    `flags`, method-chain composition, and the generated per-module views.
+
+## Implementation notes (2026-10-15, registry: extensions)
+
+`packages/core/src/registry/extension.ts` and the extension steps of `buildRegistry`. Where the implementation refines
+§7.2–§7.6:
+
+1. **Extended models are rebuilt through `defineModel`.** Models keep their declared `definition`; the registry merges it
+   with the extensions (fields, field overrides, methods, overrides, constraints, indexes, tracking) and defines the
+   model again, so every model-level validation and `describe()` applies to the final model.
+2. **Typing without the generator:** `Module` carries its extensions' types, and the schema view intersects a model with
+   its extensions by name, so extension fields type `env.model()` today. The generator will emit per-module views later.
+3. **`OverrideFn` is deliberately loose** (`next: never`) so typed implementations are accepted; exact typing of `next`
+   and `this` arrives with the generated views.
+4. **Rules implemented:** S1 (required needs default or compute; booleans exempt), S2 (tighten only, with a default), S4
+   (allowed attributes), S5/S6 (`selectionAdd` only when `extensible`), S7 (override target must exist), S8 (kind, column,
+   store and target are not overridable: no API exposes them), plus §7.6 conflicts with both module names and the
+   "use fieldOverrides / overrides" variants when the existing member comes from a dependency. Implicit fields can't be
+   overridden.
+5. **Cross-model checks use the field's origin module** for the dependency check, so an extension's relation to a model
+   its module doesn't depend on is an `UndeclaredDependencyError` even though the base model's owner might depend on it.
+6. **Not yet:** mixins (`defineMixin`), module `flags` and `precisions`, `replace()` warnings at build time in dev mode,
+   and the generator.
