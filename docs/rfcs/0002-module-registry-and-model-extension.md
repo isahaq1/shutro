@@ -691,3 +691,24 @@ Resolved on 2026-10-14. The original questions are kept below for context.
    contains only the indexes the stopgap doesn't create, which is asserted in the integration tests.
 6. **Not here:** data files / seed data (§12), renames (a drop plus an add in the diff: write the `RENAME` by hand), and
    the CLI entry points (`shutro migrate plan|write|apply`) which come with the CLI package.
+
+## Implementation notes (2026-10-15, `shutro generate`)
+
+`packages/cli` (`generate` command, `defineConfig`) and `F` in `packages/core/src/model/generated.ts`. Where the
+implementation settles §7.7 and open question 4:
+
+1. **Open question 4 is answered: no compiler API.** TypeScript 7 ships no JavaScript API, so method signatures are not
+   printed. The fallback from §11 is used: `methods` is an intersection of `F.Methods<typeof import('../module.js').sale,
+   'sale.order'>` terms, one per module contributing to the model, which reads the declared signatures from the sources.
+   Every module in the graph must therefore be listed in `shutro.config.ts` (`ModuleSourceError` otherwise).
+2. **Fields are spelled with `F.*`** using the builders' option vocabulary (`{ readonly required: true; readonly
+   compute: 'computeAmounts'; readonly store: true }`), and `FlagsOf` now resolves its result into a fresh structural
+   type, so a generated field is *identical* (not merely mutually assignable) to the declared one. The type tests assert
+   this with `toEqualTypeOf`.
+3. **Layout as in §7.7**, minus `paths`: `<module>/.shutro/{schema.d.ts,bindings.ts}` and `<app>/.shutro/{schema.d.ts,index.ts}`.
+   `paths` is deferred until `depends` / `related` are typed; at ERP width the depth-3 union is too large to emit blindly.
+4. **Hash and check.** The header carries a hash of the view's definitions (module versions, model descriptions); `--check`
+   compares file contents and exits 1 on drift. The development-time stale warning in `buildRegistry` and `--watch` are
+   not implemented.
+5. **The CLI** currently has only `generate`; `init`, `migrate` and `inspect` print "not implemented" (exit 2) until the
+   CLI roadmap item.

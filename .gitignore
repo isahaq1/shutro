@@ -1,4 +1,5 @@
 .shutro/
+!packages/cli/test/fixtures/**/.shutro/
 node_modules/
 dist/
 .turbo/
