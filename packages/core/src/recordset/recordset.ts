@@ -938,6 +938,7 @@ export function modelRef(
   search(query?: unknown): Promise<RecordSetImpl>;
   browse(ids: readonly number[]): RecordSetImpl;
   onchange(input: OnchangeInputRaw): Promise<OnchangeResultRaw>;
+  copy(rows: readonly Readonly<Record<string, unknown>>[]): Promise<RecordSetImpl>;
 } {
   const internals = internalsOf(env);
   const registered = internals.registry.get(name);
@@ -997,5 +998,9 @@ export function modelRef(
       return new (recordClass(model))(env, registered, [...ids], { ids: [...ids] }, undefined);
     },
     onchange: (input) => runOnchange(onchangeHost(loader), model, input),
+    async copy(rows: readonly Readonly<Record<string, unknown>>[]): Promise<RecordSetImpl> {
+      const ids = await createRecords(writeHost(loader), model, rows, { copy: true });
+      return new (recordClass(model))(env, registered, ids, { ids }, undefined);
+    },
   };
 }

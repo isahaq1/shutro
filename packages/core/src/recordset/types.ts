@@ -290,6 +290,12 @@ export interface ModelRef<S, M extends ModelName<S>> {
   browse(ids: readonly number[]): PendingSet<S, M>;
   /** Form assist on an in-memory draft: derived values and warnings, nothing written (RFC 0009 §7.4). */
   onchange(input: OnchangeInput<S, M>): Promise<OnchangeResult<S, M>>;
+  /**
+   * Bulk create through PostgreSQL COPY (RFC 0015 §7.1): the same semantics as create() (defaults, sequences,
+   * computes, constraints, audit, rules), one streamed statement instead of 1,000-row INSERTs. Needs the `import`
+   * permission. x2many commands are not accepted.
+   */
+  copy(values: readonly CreateValues<S, M>[]): Promise<RecordSet<S, M, DefaultLoaded<S, M>>>;
 }
 
 // ------------------------------------------------------------------------------------------------ computes

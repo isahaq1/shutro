@@ -196,8 +196,8 @@ await shutro.run({ user, company }, async (env) => {
 
 ### Phase 5 — DX & performance
 - [x] CLI, query inspector, schema explorer (shutro init | generate | migrate | inspect; createInspector with N+1 and slow warnings)
-- [ ] Bulk operations (COPY), partitioning support
-- [ ] Benchmarks in CI
+- [x] Bulk operations (COPY), partitioning support (RFC 0015: env.model(M).copy(), partition: { by, key }, partitionStatements / rangePartitions)
+- [x] Benchmarks in CI (benchmarks/: query budgets as the gate, timings uploaded)
 
 ### Phase 6 — Proof
 - [ ] `examples/erp-demo`: partner, product, sale, invoice modules built on Shutro

@@ -170,7 +170,11 @@ const CONNECTION_CODES = new Set([
   'CONNECT_TIMEOUT',
 ]);
 
-function constraintMessage(kind: ConstraintKind, d: DriverErrorDetails): readonly [string, string] {
+function constraintMessage(
+  kind: ConstraintKind,
+  d: DriverErrorDetails,
+  serverMessage = '',
+): readonly [string, string] {
   const on = d.table === undefined ? '' : ` on "${d.table}"`;
   const detail = d.detail === undefined ? '' : `${d.detail} `;
   switch (kind) {
@@ -190,6 +194,11 @@ function constraintMessage(kind: ConstraintKind, d: DriverErrorDetails): readonl
         'Provide a value, or give the field a default.',
       ];
     case 'check':
+      if (d.constraint === undefined && /no partition/i.test(serverMessage))
+        return [
+          `No partition accepts the row${on}.`,
+          `${detail}Create the partition for this value first (partitionStatements / rangePartitions), or add a DEFAULT partition.`,
+        ];
       return [
         `A value breaks the check constraint "${d.constraint ?? '?'}"${on}.`,
         `${detail}Correct the value so it satisfies the constraint.`,
@@ -219,7 +228,7 @@ export function mapPostgresError(error: unknown): unknown {
     };
     const kind = CONSTRAINT_KINDS[error.code];
     if (kind !== undefined) {
-      const [problem, hint] = constraintMessage(kind, details);
+      const [problem, hint] = constraintMessage(kind, details, error.message);
       return new ConstraintViolationError(kind, problem, hint, details);
     }
     switch (error.code) {

@@ -148,12 +148,16 @@ export async function createRecords(
   host: WriteHost,
   model: AnyModel,
   rows: readonly Row[],
+  options: { readonly copy?: boolean } = {},
 ): Promise<number[]> {
   const { internals } = host;
   if (rows.length === 0) return [];
   assertAccess(internals, model, 'create');
+  if (options.copy === true) assertAccess(internals, model, 'import');
   for (const row of rows) assertFields(internals, model, Object.keys(row), 'write');
-  const columns = [...host.defaults(model)].filter(
+  // The default projection leaves out binary fields: add every stored key a row gives explicitly.
+  const given = new Set(rows.flatMap((r) => Object.keys(r).filter((k) => r[k] !== undefined)));
+  const columns = [...new Set([...host.defaults(model), ...given])].filter(
     (k) => k !== 'id' && model.columns[k] !== undefined,
   );
   const prepared = rows.map((row) => {
@@ -191,7 +195,8 @@ export async function createRecords(
   await fillSequences(internals, model, prepared);
 
   const ids: number[] = [];
-  for (let i = 0; i < prepared.length; i += CHUNK) {
+  if (options.copy === true) ids.push(...(await copyRows(internals, model, columns, prepared)));
+  for (let i = 0; i < (options.copy === true ? 0 : prepared.length); i += CHUNK) {
     const chunk = prepared.slice(i, i + CHUNK);
     const arrays = columns.map((key) =>
       sql.array(
@@ -236,10 +241,93 @@ export async function createRecords(
   for (const f of internals.registry.compute.stored(model.name))
     internals.markToCompute(model.name, f.key, ids);
 
+  // one2many `create` commands of every new parent become one child insert per field (no INSERT per parent).
+  const batched = new Map<string, { parent: number; rows: Row[] }[]>();
   for (const [i, p] of prepared.entries()) {
-    for (const [key, commands] of p.commands)
-      await applyCommands(host, model, ids[i] as number, key, commands, 'create');
+    for (const [key, commands] of p.commands) {
+      const field = model.fields[key] as Field;
+      const onlyCreate = Object.entries(commands).every(
+        ([c, v]) => c === 'create' || v === undefined,
+      );
+      if (field.kind === 'one2many' && onlyCreate && Array.isArray(commands['create'])) {
+        const list = batched.get(key) ?? [];
+        list.push({ parent: ids[i] as number, rows: commands['create'] as Row[] });
+        batched.set(key, list);
+      } else await applyCommands(host, model, ids[i] as number, key, commands, 'create');
+    }
   }
+  for (const [key, parents] of batched) {
+    const field = model.fields[key] as Field & { target: string; inverseField?: string };
+    const target = internals.registry.get(field.target).model;
+    const inverse = field.inverseField ?? '';
+    const childRows = parents.flatMap(({ parent, rows: rs }) =>
+      rs.map((r) => ({ ...r, [inverse]: parent })),
+    );
+    const childIds = await createRecords(host, target, childRows);
+    let at = 0;
+    for (const { parent, rows: rs } of parents) {
+      (host.values(model.name, parent, true) as Map<string, unknown>).set(
+        key,
+        childIds.slice(at, at + rs.length),
+      );
+      at += rs.length;
+    }
+    internals.trigger(
+      model.name,
+      key,
+      parents.map((p) => p.parent),
+    );
+  }
+  return ids;
+}
+
+// ---------------------------------------------------------------------------------------------------- copy
+
+/** One value in COPY text format: \N for null, backslash escapes, bytea as hex (RFC 0015 §7.1). */
+export function copyField(value: unknown): string {
+  if (value === null || value === undefined) return '\\N';
+  let text: string;
+  if (typeof value === 'boolean') text = value ? 't' : 'f';
+  else if (value instanceof Uint8Array) text = `\\x${Buffer.from(value).toString('hex')}`;
+  else text = String(value);
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
+/**
+ * Bulk insert through `COPY ... FROM STDIN`: ids are reserved from the identity sequence in one query (COPY writes
+ * identity values as given), then every row streams in one statement. Returns the ids in input order.
+ */
+async function copyRows(
+  internals: ScopeInternals,
+  model: AnyModel,
+  columns: readonly string[],
+  prepared: readonly { readonly stored: Map<string, unknown> }[],
+): Promise<number[]> {
+  const reserved = await internals.query<{ id: number | string }>(
+    compile(
+      sql`SELECT nextval(pg_get_serial_sequence(${model.table}, ${'id'})) AS ${sql.id('id')} FROM generate_series(1, ${prepared.length})`,
+    ),
+  );
+  const ids = reserved.map((r) => Number(r.id));
+  const fields = columns.map((k) => model.fields[k] as Field);
+  const lines = prepared.map((p, i) =>
+    [
+      String(ids[i]),
+      ...columns.map((k, c) =>
+        copyField(storedValue(internals, fields[c] as Field, p.stored.get(k))),
+      ),
+    ].join('\t'),
+  );
+  const names = [sql.id('id'), ...columns.map((k) => sql.id(model.columns[k] ?? ''))];
+  const count = await internals.copyIn(
+    compile(sql`COPY ${sql.id(model.table)} (${sql.join(names)}) FROM STDIN`),
+    lines,
+  );
+  if (count !== prepared.length) throw new MissingRecordError(model.name, []);
   return ids;
 }
 

@@ -1,0 +1,16 @@
+{
+  "name": "@shutro-bench/orm",
+  "private": true,
+  "type": "module",
+  "description": "ORM benchmarks with query budgets, run in CI (RFC 0015 §7.3)",
+  "scripts": {
+    "bench": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@shutro/core": "workspace:*",
+    "@shutro/driver-pg": "workspace:*",
+    "@shutro/sql": "workspace:*",
+    "@shutro/testing": "workspace:*"
+  }
+}

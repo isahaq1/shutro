@@ -57,6 +57,21 @@ importers:
         specifier: ^5.0.4
         version: 5.0.4(@types/node@24.19.2)(vite@8.3.4(@types/node@24.19.2)(yaml@2.9.1))
 
+  benchmarks:
+    dependencies:
+      '@shutro/core':
+        specifier: workspace:*
+        version: link:../packages/core
+      '@shutro/driver-pg':
+        specifier: workspace:*
+        version: link:../packages/driver-pg
+      '@shutro/sql':
+        specifier: workspace:*
+        version: link:../packages/sql
+      '@shutro/testing':
+        specifier: workspace:*
+        version: link:../packages/testing
+
   packages/audit:
     dependencies:
       '@shutro/sql':

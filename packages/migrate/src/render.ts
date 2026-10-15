@@ -54,7 +54,11 @@ function createTable(table: TableSpec): string {
   );
   if (needsPk && table.primaryKey.length > 0)
     columns.push(`PRIMARY KEY (${table.primaryKey.map((c) => id(c)).join(', ')})`);
-  return `CREATE TABLE ${id(table.name)} (${columns.join(', ')})`;
+  const partition =
+    table.partition === undefined
+      ? ''
+      : ` PARTITION BY ${table.partition.by.toUpperCase()} (${id(table.partition.column)})`;
+  return `CREATE TABLE ${id(table.name)} (${columns.join(', ')})${partition}`;
 }
 
 /** Renders one operation as a statement. */

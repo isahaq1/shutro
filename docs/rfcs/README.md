@@ -21,6 +21,7 @@ An RFC is only implemented after it has been approved and its status set to **Ac
 | 0012 | [Sequences](0012-sequences.md) | Accepted | 0001, 0003, 0010 |
 | 0013 | [Audit trail](0013-audit-trail.md) | Accepted | 0001, 0003, 0004, 0008, 0010, 0012 |
 | 0014 | [Security](0014-security.md) | Accepted | 0001, 0003, 0004, 0005 |
+| 0015 | [Bulk operations, partitioning and benchmarks](0015-bulk-partitioning-benchmarks.md) | Accepted | 0004, 0007 |
 
 ## Lifecycle
 

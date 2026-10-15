@@ -670,6 +670,12 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
       const target = targetOf(field);
       if (target !== undefined) {
         const other = resolve(fromModule, target, where);
+        if (field.kind !== 'one2many' && other.model.partition !== undefined) {
+          throw new InvalidRelationError(
+            `${where} points at '${target}', which is partitioned.`,
+            'A foreign key cannot reference a partitioned table without its partition key: reference a non-partitioned model, or store the id in a plain integer field.',
+          );
+        }
         if (field.kind === 'one2many') {
           const inverseKey = (field as unknown as { inverseField: string }).inverseField;
           const inverse = other.model.fields[inverseKey];
