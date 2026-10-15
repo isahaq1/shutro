@@ -179,7 +179,20 @@ describe('ERP demo', () => {
   test('accounting invoices confirmed orders and posts them with gapless numbers and company-currency totals', async () => {
     const result = await as('carol', async (env) => {
       const confirmed = await env.model('sale.order').search({ where: { state: 'sale' } });
+      // Carol (accountant) cannot read order lines herself; createInvoices declares the elevation it needs.
+      await expect(env.model('sale.order.line').search()).rejects.toThrow(
+        /read access to sale.order.line is denied/,
+      );
       const ids = await confirmed.createInvoices({ date: '2026-10-20' });
+      expect(env.access.can('sale.order.line', 'read')).toBe(false); // the elevation did not leak
+      const [elevation] = await env.sql<{
+        reason: string;
+        new: unknown;
+      }>`SELECT reason, new FROM shutro_audit WHERE action = 'elevate'`;
+      expect(elevation).toEqual({
+        reason: 'invoice confirmed orders',
+        new: ['sale.order.line:read'],
+      });
       const invoices = await env
         .model('account.move')
         .browse([...ids])

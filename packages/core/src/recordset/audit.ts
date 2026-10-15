@@ -168,6 +168,26 @@ export function trackSuperuser(internals: ScopeInternals, reason: string): void 
   });
 }
 
+/** Records a scoped elevation (`env.withGrants`, elevated methods): which grants, and why (RFC 0014 §7.9). */
+export function trackElevation(
+  internals: ScopeInternals,
+  grants: readonly string[],
+  reason: string,
+): void {
+  if (!internals.env.flags.tracking) return;
+  internals.auditRows.push({
+    ...base(internals),
+    su: false,
+    reason,
+    action: 'elevate',
+    model: null,
+    recordId: null,
+    field: null,
+    old: null,
+    new: [...grants],
+  });
+}
+
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }

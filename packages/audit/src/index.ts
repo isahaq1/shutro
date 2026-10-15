@@ -6,7 +6,7 @@
 import { type CompiledSql, compile, sql } from '@shutro/sql';
 
 /** What happened. `su` rows record a superuser scope (RFC 0003 §7.6). */
-export type AuditAction = 'create' | 'write' | 'unlink' | 'su';
+export type AuditAction = 'create' | 'write' | 'unlink' | 'su' | 'elevate';
 
 /** One row of the trail. */
 export interface AuditEntry {

@@ -22,7 +22,7 @@ import {
 } from '../errors.js';
 import type { Id } from '../model/id.js';
 import { createFx, type Fx } from '../money/fx.js';
-import { trackSuperuser } from '../recordset/audit.js';
+import { trackElevation, trackSuperuser } from '../recordset/audit.js';
 import { invalidateCached } from '../recordset/compute.js';
 import {
   companyCurrencyId,
@@ -43,6 +43,7 @@ import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ModelName, ModelRef } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
 import {
+  assertGrants,
   assertLang,
   assertReason,
   type Identity,
@@ -504,6 +505,30 @@ export class Env<S = unknown> {
   withFlags(flags: Partial<Flags>): Env<S> {
     if (flags.checkCompany === false && !this.su) throw new FlagNotAllowedError('checkCompany');
     return this.#derive({ flags: Object.freeze({ ...this.flags, ...flags }) });
+  }
+
+  /**
+   * Runs `fn` with extra special grants in the same scope (RFC 0014 §7.9): a narrow, audited alternative to
+   * {@link asSuperuser} for code that must touch a model or feature its caller cannot. Record rules, field groups
+   * and company scoping still apply; only the named grants are added, and only inside `fn`.
+   *
+   * ```ts
+   * await env.withGrants({ grants: ['sale.order.line:read'], reason: 'invoice from orders' }, (e) => ...);
+   * ```
+   */
+  async withGrants<T>(
+    options: { readonly grants: readonly string[]; readonly reason: string },
+    fn: (env: Env<S>) => Promise<T>,
+  ): Promise<T> {
+    const reason = assertReason(options.reason);
+    const grants = assertGrants(options.grants);
+    this.#assertUsable();
+    const elevated = this.#derive({
+      grants: Object.freeze([...new Set([...this.grants, ...grants])]),
+    });
+    if (this.#runtime.registry !== undefined)
+      trackElevation(internalsOf(elevated as unknown as Env), grants, reason);
+    return fn(elevated);
   }
 
   /**

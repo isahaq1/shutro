@@ -345,3 +345,23 @@ describe('back-dated entries', () => {
     ).toThrow(/back-dated entries, which no module declares/);
   });
 });
+
+describe('scoped elevation', () => {
+  test('withGrants adds grants inside the callback only, and validates them', async () => {
+    await as(1, ['base.user'], async (env) => {
+      expect(env.access.can('x.note', 'unlink')).toBe(false);
+      const inside = await env.withGrants(
+        { grants: ['x.note:unlink'], reason: 'cleanup' },
+        async (e) => e.access.can('x.note', 'unlink'),
+      );
+      expect(inside).toBe(true);
+      expect(env.access.can('x.note', 'unlink')).toBe(false);
+      await expect(
+        env.withGrants({ grants: ['bad grant'], reason: 'x' }, async () => 1),
+      ).rejects.toThrow(/not a grant/);
+      await expect(
+        env.withGrants({ grants: ['x.approve'], reason: ' ' }, async () => 1),
+      ).rejects.toThrow(/reason is required/);
+    });
+  });
+});

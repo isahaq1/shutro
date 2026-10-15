@@ -165,8 +165,10 @@ export const SaleOrderInvoicing = extendModel('sale.order', {
   },
   methods: {
     /** Draft invoices for confirmed orders, one per order, with the order's lines. Returns the invoice ids. */
+    // Accountants may not read order lines in general; invoicing reads them for these orders only (audited).
     createInvoices: method(
       'sale.order',
+      { elevate: ['sale.order.line:read'], reason: 'invoice confirmed orders' },
       async function (
         options: { readonly date?: string } = {},
       ): Promise<readonly Id<'account.move'>[]> {
@@ -203,11 +205,6 @@ export const SaleOrderInvoicing = extendModel('sale.order', {
   },
 });
 
-/** Accountants read the order lines they invoice (each model a method touches needs a grant: docs/feedback.md #8). */
-export const SaleOrderLineInvoicing = extendModel('sale.order.line', {
-  access: { 'account.user': ['read'] },
-});
-
 export const invoice = defineModule({
   name: 'invoice',
   version: '1.0.0',
@@ -237,5 +234,5 @@ export const invoice = defineModule({
     }),
   ],
   models: [AccountMove, AccountMoveLine],
-  extensions: [SaleOrderInvoicing, SaleOrderLineInvoicing],
+  extensions: [SaleOrderInvoicing],
 });
