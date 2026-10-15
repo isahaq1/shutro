@@ -3,7 +3,16 @@
  * the cache holds (Decimal amounts, ids, ...), and converts cached values into what the driver binds.
  */
 
+import { isTranslations, mergeTranslation } from '@shutro/i18n';
+import { type SqlFragment, sql } from '@shutro/sql';
 import { Decimal as DecimalJs } from 'decimal.js';
+
+/** The environment language and the source language, for translatable values (RFC 0011). */
+export interface TranslationContext {
+  readonly lang: string;
+  readonly source: string;
+}
+
 import { CurrencyMismatchError, UomMismatchError, ValidationError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
@@ -26,7 +35,20 @@ export function fail(
 /** The PostgreSQL array element type for a field (for `unnest($n::type[])`). */
 export function arrayType(field: Field): string {
   if (field.kind === 'many2one') return 'bigint';
+  // JSON travels as text and is cast in SQL (columnCast): array parameters of jsonb would be re-encoded by the driver.
+  if (columnCast(field) !== undefined) return 'text';
   return field.pgType;
+}
+
+/** The SQL cast applied to a bound value before it reaches the column (`jsonb` for json and translatable fields). */
+export function columnCast(field: Field): 'jsonb' | undefined {
+  return field.kind === 'json' || field.translate ? 'jsonb' : undefined;
+}
+
+/** A reference to the bound value of `column` in the `v` row alias, cast when needed. */
+export function valueRef(field: Field, column: string): SqlFragment {
+  const ref = sql.id('v', column);
+  return columnCast(field) === undefined ? ref : sql`${ref}::jsonb`;
 }
 
 /** Converts a cached value into what the driver binds. */
@@ -35,7 +57,7 @@ export function bindValue(field: Field, value: unknown): unknown {
   if (DecimalJs.isDecimal(value)) return (value as DecimalJs).toFixed();
   // Inside arrays, postgres.js would type a Date as a scalar timestamptz; an ISO string lets the ::timestamptz[] cast apply.
   if (value instanceof Date) return value.toISOString();
-  if (field.kind === 'json') return JSON.stringify(value);
+  if (field.kind === 'json' || field.translate) return JSON.stringify(value);
   return value;
 }
 
@@ -49,6 +71,7 @@ export function normalize(
   field: Field,
   value: unknown,
   siblings: (key: string) => unknown,
+  translation?: TranslationContext,
 ): unknown {
   const bad = (what: string, hint: string): never =>
     fail(model, [key], `field '${key}' ${what}.`, hint);
@@ -112,8 +135,24 @@ export function normalize(
       return typeof value === 'boolean' ? value : bad('expects true or false', 'Pass a boolean.');
     case 'char':
     case 'text':
-    case 'html':
+    case 'html': {
+      if (field.translate) {
+        if (typeof value !== 'string' && !isTranslations(value))
+          return bad(
+            'expects a string or a { lang: text } map',
+            "Pass 'text' (written in the environment language) or { en_US: 'text', bn_BD: '...' }.",
+          );
+        const ctx = translation ?? { lang: 'en_US', source: 'en_US' };
+        const existing = siblings(key);
+        return mergeTranslation(
+          isTranslations(existing) ? existing : null,
+          value,
+          ctx.lang,
+          ctx.source,
+        );
+      }
       return typeof value === 'string' ? value : bad('expects a string', 'Pass a string.');
+    }
     case 'date':
       return typeof value === 'string' && DATE.test(value)
         ? value

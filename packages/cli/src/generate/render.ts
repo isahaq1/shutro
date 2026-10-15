@@ -56,6 +56,7 @@ function flagOptions(field: Field): string {
     if (field.store) parts.push('store: true');
   }
   if (field.inverse !== undefined) parts.push('inverse: true');
+  if (field.translate) parts.push('translate: true');
   if (field.sequence !== undefined) parts.push('sequence: true');
   return parts.length === 0 ? '' : `{ ${parts.map((p) => `readonly ${p}`).join('; ')} }`;
 }

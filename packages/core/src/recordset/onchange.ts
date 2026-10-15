@@ -8,7 +8,7 @@ import type { ScopeInternals } from '../env/env.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { type ComputeHost, computeFields } from './compute.js';
-import { fail, normalize } from './values.js';
+import { fail, normalize, type TranslationContext } from './values.js';
 
 /** What the draft runtime needs from the recordset runtime. */
 export interface OnchangeHost extends ComputeHost {
@@ -47,6 +47,10 @@ export interface DraftRaw {
   warn(message: string): void;
 }
 
+function translationOf(host: OnchangeHost): TranslationContext {
+  return { lang: host.internals.env.lang, source: host.internals.sourceLang };
+}
+
 function defaultOf(field: Field, env: ScopeInternals['env']): unknown {
   return typeof field.default === 'function'
     ? (field.default as (env: unknown) => unknown)(env)
@@ -67,6 +71,7 @@ function setDraftValue(
   values: Map<string, unknown>,
   key: string,
   value: unknown,
+  translation?: TranslationContext,
 ): void {
   const field = model.fields[key];
   if (field === undefined || key === 'id')
@@ -87,7 +92,7 @@ function setDraftValue(
   }
   values.set(
     key,
-    normalize(model, key, field, value, (k) => values.get(k)),
+    normalize(model, key, field, value, (k) => values.get(k), translation),
   );
 }
 
@@ -123,7 +128,8 @@ async function materialize(
       if (isX2Many(model.fields[key] as Field)) values.set(key, []);
     }
   }
-  for (const [key, value] of Object.entries(preset)) setDraftValue(model, values, key, value);
+  for (const [key, value] of Object.entries(preset))
+    setDraftValue(model, values, key, value, translationOf(host));
   for (const [key, value] of Object.entries(given)) {
     if (value === undefined) continue;
     const field = model.fields[key];
@@ -159,7 +165,7 @@ async function materialize(
       children.set(key, created);
       continue;
     }
-    setDraftValue(model, values, key, value);
+    setDraftValue(model, values, key, value, translationOf(host));
   }
   return vid;
 }
@@ -223,7 +229,7 @@ export async function runOnchange(
       env: internals.env,
       get: (key) => values.get(key),
       set(key, value) {
-        setDraftValue(model, values, key, value);
+        setDraftValue(model, values, key, value, translationOf(host));
         if (!done.has(key) && !queue.includes(key)) queue.push(key);
       },
       async record(key) {

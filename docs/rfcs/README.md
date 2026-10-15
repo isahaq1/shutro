@@ -17,6 +17,7 @@ An RFC is only implemented after it has been approved and its status set to **Ac
 | 0008 | [Compute engine](0008-compute-engine.md) | Accepted | 0001, 0002, 0004 |
 | 0009 | [Constraints and onchange](0009-constraints-and-onchange.md) | Accepted | 0001, 0004, 0008 |
 | 0010 | [State machines](0010-state-machines.md) | Accepted | 0001, 0002, 0008, 0009 |
+| 0011 | [Translatable fields](0011-translatable-fields.md) | Accepted | 0001, 0003, 0004, 0005 |
 
 ## Lifecycle
 

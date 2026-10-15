@@ -3,6 +3,7 @@
  * the entry points of writes (see writes.ts) and computes (see compute.ts).
  */
 
+import { resolveTranslation, type Translations } from '@shutro/i18n';
 import { compile, sql } from '@shutro/sql';
 import { Decimal as DecimalJs } from 'decimal.js';
 import { type Env, internalsOf, type ScopeInternals } from '../env/env.js';
@@ -23,7 +24,7 @@ import {
   recompute,
 } from './compute.js';
 import { checkConstraints } from './constraints.js';
-import { compileDomain, compileOrder, scopingConditions } from './domain.js';
+import { compileDomain, compileOrder, scopingConditions, type TranslationScope } from './domain.js';
 import {
   type OnchangeHost,
   type OnchangeInputRaw,
@@ -305,7 +306,7 @@ async function fetchX2Many(
       sql`${t}.${sql.id('id')}`,
       ...wanted.map((k) => sql`${t}.${sql.id(target.columns[k] ?? '')}`),
     ]);
-    const order = compileOrder(target, undefined);
+    const order = compileOrder(target, undefined, translationScope(loader.internals));
     for (let i = 0; i < missing.length; i += CHUNK) {
       const chunk = missing.slice(i, i + CHUNK);
       let rows: readonly Record<string, unknown>[];
@@ -579,6 +580,22 @@ export class RecordSetImpl {
     return this.ids;
   }
 
+  /** The full translation map of a translatable field of a singleton (`null` when empty). */
+  translations(key: string): Translations | null {
+    const field = this.model.fields[key];
+    if (field === undefined || !field.translate)
+      throw new FieldNotLoadedError(this.modelName, key, `'${key}' is not a translatable field.`);
+    const values = valuesOf(internalsOf(this.env).cache, this.modelName, this.id);
+    if (values === undefined || !values.has(key))
+      throw new FieldNotLoadedError(
+        this.modelName,
+        key,
+        `Load it first: await records.load(['${key}']).`,
+      );
+    const raw = values.get(key);
+    return raw === null || raw === undefined ? null : (raw as Translations);
+  }
+
   /** @internal Runs a transition of state field `key` on these records (RFC 0010 §7.2). */
   async transition(key: string, name: string): Promise<void> {
     await runTransition(computeHost(this.#loader), this.model, await this.resolveIds(), key, name);
@@ -644,6 +661,13 @@ export class RecordSetImpl {
       throw new FieldNotLoadedError(this.modelName, key, hint);
     }
     const raw = values.get(key);
+    if (field.translate) {
+      return resolveTranslation(
+        raw as Translations | null,
+        this.env.lang,
+        internalsOf(this.env).sourceLang,
+      );
+    }
     if (field.kind === 'many2one') {
       if (raw === null) return null;
       const target = this.#loader.registry.get(targetOf(field) ?? '');
@@ -777,6 +801,10 @@ function writeHost(loader: Loader): WriteHost {
   };
 }
 
+function translationScope(internals: ScopeInternals): TranslationScope {
+  return { lang: internals.env.lang, source: internals.sourceLang };
+}
+
 /** @internal The currency value object of a `res.currency` id, loaded through the cache. */
 export async function currencyById(internals: ScopeInternals, id: number): Promise<Currency> {
   const cached = internals.cache.currencies.get(id);
@@ -858,14 +886,18 @@ export function modelRef(
         sql.id('id'),
         ...wanted.map((k) => sql.id(model.columns[k] ?? '')),
       ]);
-      const conditions = [...compileDomain(model, query.where), ...scopingConditions(model, env)];
+      const translation = translationScope(internals);
+      const conditions = [
+        ...compileDomain(model, query.where, translation),
+        ...scopingConditions(model, env),
+      ];
       const where =
         conditions.length === 0 ? sql.empty : sql` WHERE ${sql.join(conditions, sql` AND `)}`;
       const limit = query.limit === undefined ? sql.empty : sql` LIMIT ${query.limit}`;
       const offset = query.offset === undefined ? sql.empty : sql` OFFSET ${query.offset}`;
       const rows = await internals.query<Record<string, unknown>>(
         compile(
-          sql`SELECT ${columns} FROM ${sql.id(model.table)}${where} ORDER BY ${compileOrder(model, query.order)}${limit}${offset}`,
+          sql`SELECT ${columns} FROM ${sql.id(model.table)}${where} ORDER BY ${compileOrder(model, query.order, translation)}${limit}${offset}`,
         ),
       );
       const ids = rows.map((row) => hydrate(model, row, wanted, internals.cache));

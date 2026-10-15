@@ -185,7 +185,7 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Constraints & onchange (RFC 0009: batched business constraints at flush points, SQL constraint mapping, onchange drafts)
 - [x] State machines (RFC 0010: generated transition methods, guards, state/transition events, statesAdd/transitionsAdd)
 - [x] Multi-company & multi-currency (company filtering, checkCompany links, env.fx dated per-company conversion)
-- [ ] Translations (JSONB)
+- [x] Translations (JSONB) (RFC 0011: translate: true fields, env.lang reads with source fallback, SQL-side COALESCE for filters and sorts)
 - [ ] Sequences (incl. gapless)
 - [ ] Audit trail
 
