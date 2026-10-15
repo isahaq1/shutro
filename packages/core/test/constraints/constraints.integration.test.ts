@@ -223,6 +223,22 @@ describe('onchange', () => {
       ]);
       expect(result.values.amountTotal).toEqual({ amount: '27.50', currency: 'BDT' });
       expect(result.warnings).toEqual([]);
+      // Child handlers run inside the parent draft: the line takes the order's currency, and warns.
+      const withHandlers = await env.model('sale.order').onchange({
+        values: {
+          name: 'DRAFT',
+          partner: ids.globex,
+          currency: ids.bdt,
+          lines: { create: [{ name: 'c', quantity: '200', priceUnit: '1' }] },
+        },
+        changed: ['lines'],
+      });
+      expect(withHandlers.children.lines?.[0]?.['currency']).toBe(ids.bdt);
+      expect(withHandlers.children.lines?.[0]?.['subtotal']).toEqual({
+        amount: '200.00',
+        currency: 'BDT',
+      });
+      expect(withHandlers.warnings).toEqual(['Large quantity: check the stock.']);
     });
     expect(await count('sale_order_line')).toBe(0);
   });

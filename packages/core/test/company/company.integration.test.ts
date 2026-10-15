@@ -178,6 +178,12 @@ describe('multi-currency', () => {
       const bdt = defineCurrency({ code: 'BDT', rounding: '0.01', id: ids.bdt });
       expect(rates.convert(usd, bdt).money.toString()).toBe('BDT 4000.00');
       expect(rates.rate(usd.currency)).toEqual({ rate: toDecimal('0.0125'), date: '2026-01-01' });
+      // By id, synchronously (feedback #9): the prepared currencies and the company currency.
+      expect(rates.convert(usd, ids.bdt).money.toString()).toBe('BDT 4000.00');
+      expect(rates.currency(ids.usd).code).toBe('USD');
+      expect(rates.rate(ids.usd).rate).toEqual(toDecimal('0.0125'));
+      expect(rates.companyCurrency.code).toBe('BDT');
+      expect(() => rates.currency(999_999)).toThrow(MissingRateError);
       expect(env.stats().queries).toBe(queries);
       await expect(env.fx.convert(usd, ids.bdt, { date: '2025-12-31' })).rejects.toBeInstanceOf(
         MissingRateError,
