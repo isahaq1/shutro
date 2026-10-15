@@ -6,6 +6,7 @@
  * (spike 0001, lesson 2).
  */
 
+import type { AuditAction, AuditEntry } from '@shutro/audit';
 import type { Translations } from '@shutro/i18n';
 import type { Env } from '../env/env.js';
 import type { CreateOf, FlagsOfField, ReadValue, WriteOf, WriteType } from '../model/faces.js';
@@ -207,6 +208,12 @@ export interface RecordSetApi<S, M extends ModelName<S>, L> {
   unlink(): Promise<void>;
   /** Plain JSON rows (ids for relations, `Money` / `Quantity` as objects, dates as ISO strings). */
   read<const K extends readonly LoadedKeys<L>[]>(keys: K): PlainRow<S, M, K[number]>[];
+  /** The audit rows of these records, newest first (RFC 0013 §7.4). */
+  trail(options?: {
+    readonly field?: Keys<S, M>;
+    readonly limit?: number;
+    readonly action?: AuditAction;
+  }): Promise<readonly AuditEntry[]>;
   /** Numbers these records from their manual sequence (RFC 0012 §7.4); records with a number are refused. */
   assignNumber<K extends SequenceKeys<S, M>>(
     key: K,

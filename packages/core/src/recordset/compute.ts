@@ -10,6 +10,7 @@ import type { ScopeInternals } from '../env/env.js';
 import { ComputeAssignmentError, RecomputeLimitError, ValidationError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import { type AnyModel, defaultDisplayName } from '../model/model.js';
+import { isTracked, trackChange } from './audit.js';
 import { junctionTable } from './relations.js';
 import { normalize } from './values.js';
 
@@ -164,9 +165,20 @@ export function invalidateCached(
     const byId = internals.cache.records.get(trigger.field.model);
     if (byId === undefined) continue;
     const invalidated: number[] = [];
+    const tracked = isTracked(internals.registry.get(trigger.field.model).model, trigger.field.key);
     for (const id of current) {
       if (isProtected(internals, trigger.field, id)) continue;
-      if (byId.get(id)?.delete(trigger.field.key) === true) invalidated.push(id);
+      const values = byId.get(id);
+      if (values === undefined || !values.has(trigger.field.key)) continue;
+      if (tracked) {
+        // Keep the value for the audit row of the recompute (RFC 0013 §7.2).
+        const name = `${trigger.field.model}.${trigger.field.key}`;
+        const previous = internals.compute.previous.get(name) ?? new Map<number, unknown>();
+        if (!previous.has(id)) previous.set(id, values.get(trigger.field.key));
+        internals.compute.previous.set(name, previous);
+      }
+      values.delete(trigger.field.key);
+      invalidated.push(id);
     }
     // Transitive: what depended on the invalidated value is stale too (the graph is acyclic).
     if (invalidated.length > 0)
@@ -287,8 +299,14 @@ export function assignComputed(
     prev: values.get(key),
     wasDirty: internals.isDirty(model.name, id, key),
   });
+  const previous = internals.compute.previous.get(`${model.name}.${key}`);
+  const prev = values.has(key) ? values.get(key) : previous?.get(id);
+  previous?.delete(id);
   values.set(key, normalized);
-  if (field.store) internals.markDirty(model.name, id, key);
+  if (field.store) {
+    internals.markDirty(model.name, id, key);
+    trackChange(internals, model, id, key, prev, normalized, (k) => values.get(k));
+  }
   internals.trigger(model.name, key, [id]);
 }
 

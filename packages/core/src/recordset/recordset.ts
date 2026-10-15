@@ -3,6 +3,7 @@
  * the entry points of writes (see writes.ts) and computes (see compute.ts).
  */
 
+import type { AuditEntry } from '@shutro/audit';
 import { resolveTranslation, type Translations } from '@shutro/i18n';
 import { compile, sql } from '@shutro/sql';
 import { Decimal as DecimalJs } from 'decimal.js';
@@ -16,6 +17,7 @@ import { defineUom, Quantity, type Uom } from '../money/quantity.js';
 import type { RoundingMethod } from '../money/rounding.js';
 import type { RegisteredModel, Registry } from '../registry/registry.js';
 import { targetOf } from '../registry/registry.js';
+import { flushAudit, trailOf } from './audit.js';
 import {
   assignComputed,
   type ComputeHost,
@@ -597,6 +599,17 @@ export class RecordSetImpl {
     return raw === null || raw === undefined ? null : (raw as Translations);
   }
 
+  /** The audit rows of these records, newest first (RFC 0013 §7.4). Pending changes are flushed first. */
+  async trail(
+    options: {
+      readonly field?: string;
+      readonly limit?: number;
+      readonly action?: AuditEntry['action'];
+    } = {},
+  ): Promise<AuditEntry[]> {
+    return trailOf(internalsOf(this.env), this.model, await this.resolveIds(), options);
+  }
+
   /** Numbers unnumbered records of a manual sequence field (RFC 0012 §7.4). */
   async assignNumber(
     key: string,
@@ -863,6 +876,7 @@ export async function flushAll(internals: ScopeInternals, model?: string): Promi
   await recompute(computeHost(loader));
   await checkConstraints(computeHost(loader));
   await flushDirty(writeHost(loader), model);
+  await flushAudit(internals, model);
 }
 
 /** @internal `env.model(name)`. */

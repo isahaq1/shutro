@@ -6,6 +6,7 @@
 import { InvalidTransitionError, TransitionGuardError } from '../errors.js';
 import type { Field, Transition } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
+import { trackChange } from './audit.js';
 import type { ComputeHost } from './compute.js';
 import { failingIds } from './constraints.js';
 
@@ -82,6 +83,7 @@ export async function runTransition(
       prev: values.get(key),
       wasDirty: internals.isDirty(model.name, id, key),
     });
+    trackChange(internals, model, id, key, values.get(key), transition.to, (k) => values.get(k));
     values.set(key, transition.to);
     internals.markDirty(model.name, id, key);
   }

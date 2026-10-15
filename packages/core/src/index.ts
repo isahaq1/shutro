@@ -8,6 +8,13 @@
  */
 
 export {
+  type AuditAction,
+  type AuditEntry,
+  auditTableStatements,
+  readTrail,
+  type TrailFilter,
+} from '@shutro/audit';
+export {
   isTranslations,
   mergeTranslation,
   resolveTranslation,
@@ -183,6 +190,7 @@ export type { Conversion, ConvertOptions, Fx, PreparedRates } from './money/fx.j
 export { Money, type MoneyJson } from './money/money.js';
 export { defineUom, Quantity, type Uom, type UomInput } from './money/quantity.js';
 export type { RoundingMethod } from './money/rounding.js';
+export { coalesceAudit, isTracked } from './recordset/audit.js';
 export { type JunctionTable, junctionTable } from './recordset/relations.js';
 export { UNNUMBERED } from './recordset/sequences.js';
 export type {
