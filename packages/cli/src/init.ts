@@ -5,9 +5,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { CliError } from './errors.js';
+import { CLI_PACKAGE, CORE_PACKAGE } from './packages.js';
 
 const FILES: Readonly<Record<string, string>> = {
-  'shutro.config.ts': `import { defineConfig } from '@shutro/cli';
+  'shutro.config.ts': `import { defineConfig } from '${CLI_PACKAGE}';
 
 export default defineConfig({
   modules: ['./modules/base/module.ts'],
@@ -15,7 +16,7 @@ export default defineConfig({
   migrations: './migrations',
 });
 `,
-  'modules/base/module.ts': `import { defineGroup, defineModel, defineModule, f } from '@shutro/core';
+  'modules/base/module.ts': `import { defineGroup, defineModel, defineModule, f } from '${CORE_PACKAGE}';
 
 export const ResUsers = defineModel('res.users', {
   access: { 'base.user': ['read'], 'base.admin': ['read', 'write', 'create', 'unlink'] },

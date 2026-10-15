@@ -17,7 +17,8 @@
     "format": "biome format --write .",
     "changeset": "changeset",
     "test:unit": "vitest run --exclude \"**/*.integration.test.ts\"",
-    "bench": "pnpm --filter @shutro-bench/orm bench"
+    "bench": "pnpm --filter @shutro-bench/orm bench",
+    "pack:npm": "pnpm build && node scripts/pack-npm.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
@@ -36,5 +37,15 @@
     "turbo": "^2.11.7",
     "typescript": "^7.0.2",
     "vitest": "^5.0.4"
-  }
+  },
+  "author": {
+    "name": "Isahaq",
+    "email": "hmisahaq01@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isahaq1/shutro.git"
+  },
+  "homepage": "https://github.com/isahaq1/shutro#readme"
 }

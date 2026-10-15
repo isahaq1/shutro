@@ -1,37 +1,90 @@
 # Shutro
 
-**The ORM built for business software.** Shutro is the data layer of the Kosh ERP framework: a
-PostgreSQL-only ORM for Node.js and TypeScript that is type-safe, secure by default, modular,
-multi-company, audit-ready and fast at scale.
+**The ORM built for business software.** Shutro is a PostgreSQL-only ORM for Node.js and TypeScript, designed for
+ERP workloads: type-safe, secure by default, modular, multi-company, multi-currency, audit-ready and fast at scale.
+It is the data layer of the Kosh ERP framework.
 
-> Status: **Phase 1, core (in progress).** No package is usable yet.
-> Design decisions are in [`docs/rfcs/`](docs/rfcs/README.md).
+> **Status: alpha (0.x).** The engine is tested end to end against real PostgreSQL (550+ tests, an ERP demo with
+> partner, product, sale and invoice modules), but the API may still change between minor versions. Known gaps are
+> tracked in [`docs/feedback.md`](docs/feedback.md).
 
-## Repository layout
+```sh
+npm install shutro
+```
 
-| Path | Contents |
-| ---- | -------- |
-| `packages/core` | Fields, `defineModel`, recordsets, environment, registry, compute engine |
-| `packages/sql` | Typed query builder, SQL AST, parameterized renderer |
-| `packages/driver-pg` | Pool, prepared statements, transactions, savepoints |
-| `packages/migrate` | Schema diff and versioned migrations |
-| `packages/security` | ACL, record rules, field security, RLS |
-| `packages/audit` · `sequence` · `i18n` | Change tracking · document numbering · translations |
-| `packages/cli` | `shutro init \| migrate \| generate \| inspect` |
-| `packages/testing` | Test helpers, Testcontainers, factories |
-| `docs/rfcs` | Design documents, written before implementation |
+Requirements: Node.js ≥ 24, PostgreSQL ≥ 14.
+
+## What it does
+
+- **Models and modules**: `defineModel` with typed field builders, modules with dependencies, typed extension of
+  other modules' models, explicit method overrides.
+- **Recordsets**: batch-first `search` / `load` / `write` / `unlink`, typed load specs, no N+1 by construction.
+- **Computed fields**: stored and non-stored, dependency graph built at startup, batched recompute before commit.
+- **Constraints and onchange**: Python-free validators at flush points, form drafts with virtual records.
+- **State machines**: transitions, guards and events as generated methods.
+- **Multi-company and multi-currency**: automatic company scoping, cross-company link protection, dated rates,
+  `Decimal` money (never floats).
+- **Translations** in JSONB with language fallback; **sequences**, including gapless ones; append-only **audit trail**.
+- **Security**: default-deny ACL, record rules compiled to SQL (following relations, e.g. "lines of my orders"),
+  optional PostgreSQL row-level security, field-level security, encrypted fields with keys outside the database,
+  verified identities.
+- **Migrations**: schema diff against the live catalog, versioned migration files, destructive-change guard.
+- **Tooling**: `shutro init | migrate | generate | inspect`, dev-mode query inspector with N+1 warnings, COPY bulk
+  loads, partitioned tables, CI benchmarks.
+
+## Quick start
+
+```sh
+npx shutro init
+```
+
+```ts
+import { buildRegistry, createShutro, defineModel, defineModule, f } from 'shutro';
+import { createDriver } from 'shutro/driver-pg';
+
+const Partner = defineModel('res.partner', {
+  access: { 'base.user': ['read', 'write', 'create'] },
+  fields: { name: f.char({ required: true }), credit: f.decimal({ scale: 2, default: '0' }) },
+});
+
+const registry = buildRegistry({ modules: [defineModule({ name: 'base', models: [Partner] })] });
+const shutro = createShutro({ driver: createDriver({ url: process.env.DATABASE_URL ?? '' }), registry });
+
+await shutro.run({ user: 1, company: 1, groups: ['base.user'] }, async (env) => {
+  const partners = await env.model('res.partner').search({ where: { name: { ilike: 'acme%' } } });
+  return partners.length;
+});
+```
+
+Entry points: `shutro` (core), `shutro/sql`, `shutro/driver-pg`, `shutro/migrate`, `shutro/cli`, `shutro/security`,
+`shutro/audit`, `shutro/sequence`, `shutro/i18n`.
+
+## Documentation
+
+- Guides: [`docs/guides/`](docs/guides/)
+- Design documents (RFCs): [`docs/rfcs/`](docs/rfcs/README.md)
+- A complete example: [`examples/erp-demo`](examples/erp-demo/README.md)
 
 ## Development
 
-Requirements: Node.js ≥ 24, pnpm 11 (`packageManager` field), and Docker for integration tests.
+Requirements: Node.js ≥ 24, pnpm 11, and Docker for integration tests.
 
 ```sh
 pnpm install
-pnpm typecheck   # tsc (TypeScript 7) for the root and every package
+pnpm typecheck   # TypeScript 7, every package
 pnpm lint        # Biome
-pnpm test        # Vitest; packages resolve to src/ through the "@shutro/source" export condition
-pnpm build       # emits dist/ for each package
-pnpm changeset   # record a release note for your change
+pnpm test        # Vitest against real PostgreSQL (Testcontainers)
+pnpm build       # dist/ for each package
+node scripts/pack-npm.ts   # assemble the single `shutro` npm package in dist-npm/shutro
 ```
 
-Contribution rules (design first, test first, Conventional Commits) are in [`CLAUDE.md`](CLAUDE.md).
+The repository is a pnpm workspace (`packages/*`); the npm package `shutro` bundles all of them. Contribution rules
+(design first, test first, Conventional Commits) are in [`CLAUDE.md`](CLAUDE.md).
+
+## Author
+
+**Isahaq**, hmisahaq01@gmail.com, mobile +8801852376598
+
+## License
+
+[MIT](LICENSE)

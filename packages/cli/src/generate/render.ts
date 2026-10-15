@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import { dirname, relative } from 'node:path';
 import type { Field, ModuleBase, RegisteredModel, Registry } from '@shutro/core';
+import { CORE_PACKAGE } from '../packages.js';
 
 /** A module and the file it is exported from. */
 export interface ModuleSource {
@@ -156,7 +157,7 @@ export function renderSchema(
   const lines: string[] = [
     `${HEADER} definitions-hash: ${definitionsHash(registry)}`,
     `// ${title}`,
-    "import type { F } from '@shutro/core';",
+    `import type { F } from '${CORE_PACKAGE}';`,
     '',
     '/** Model name → model type (RFC 0002 §7.7). */',
     'export interface SchemaView {',
@@ -183,7 +184,7 @@ export function renderSchema(
 }
 
 const ALIASES = [
-  "import type { DefaultLoaded, Env as CoreEnv, RecordSet as CoreRecordSet, Shutro as CoreShutro } from '@shutro/core';",
+  `import type { DefaultLoaded, Env as CoreEnv, RecordSet as CoreRecordSet, Shutro as CoreShutro } from '${CORE_PACKAGE}';`,
   "import type { SchemaView } from './schema.js';",
   '',
   'export type { SchemaView };',
@@ -202,7 +203,7 @@ export function renderBindings(registry: Registry, module: string): string {
   return `${[
     `${HEADER} definitions-hash: ${definitionsHash(registry)}`,
     `// Bindings of module \`${module}\`: import the definition API from here to get types scoped to what it can see.`,
-    "export { defineModel, defineModule, extendModel, f, replace } from '@shutro/core';",
+    `export { defineModel, defineModule, extendModel, f, replace } from '${CORE_PACKAGE}';`,
     ...ALIASES,
   ].join('\n')}\n`;
 }
@@ -212,7 +213,7 @@ export function renderAppIndex(registry: Registry): string {
   return `${[
     `${HEADER} definitions-hash: ${definitionsHash(registry)}`,
     '// Application view: every installed module. Build the registry from the same modules and pass it here.',
-    "import { createShutro as coreCreateShutro, type Registry, type ShutroOptions } from '@shutro/core';",
+    `import { createShutro as coreCreateShutro, type Registry, type ShutroOptions } from '${CORE_PACKAGE}';`,
     ...ALIASES,
     '',
     '/** `createShutro` whose environments are typed to the application view. */',
