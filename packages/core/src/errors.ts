@@ -29,6 +29,7 @@ export type ShutroErrorCode =
   | 'SINGLETON'
   | 'MISSING_RECORD'
   | 'UNKNOWN_EXTERNAL_ID'
+  | 'STALE_RECORD'
   | 'INVALID_DOMAIN'
   | 'NO_REGISTRY'
   | 'VALIDATION'
@@ -299,6 +300,26 @@ export class MissingRecordError extends ShutroError {
       `${model} record(s) ${ids.join(', ')} do not exist or are not accessible.`,
       'The id may come from stale data or another company; search for the record instead of browsing a remembered id.',
     );
+  }
+}
+
+/**
+ * A compare-and-set write found records changed since they were read (lost-update protection, RFC 0018 §7.1):
+ * someone else saved first.
+ */
+export class StaleRecordError extends ShutroError {
+  readonly model: string;
+  readonly records: readonly number[];
+  readonly fields: readonly string[];
+  constructor(model: string, records: readonly number[], fields: readonly string[]) {
+    super(
+      'STALE_RECORD',
+      `${model} record(s) ${records.join(', ')} changed since they were read (${fields.join(', ')}).`,
+      'Someone else saved first: reload the record, reapply the change, and save again.',
+    );
+    this.model = model;
+    this.records = Object.freeze([...records]);
+    this.fields = Object.freeze([...fields]);
   }
 }
 

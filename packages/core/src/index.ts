@@ -128,6 +128,7 @@ export {
   type ShutroErrorCode,
   SingletonError,
   type SqlConstraintKind,
+  StaleRecordError,
   TransactionScopeError,
   TransitionGuardError,
   UndeclaredDependencyError,
