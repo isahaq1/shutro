@@ -98,3 +98,9 @@ type is only known once the module is built.
 
 `registry.compute.fields` lists every computed field with its rank and parsed paths; `registry.compute.triggers` maps
 `model → key → dependents`. `shutro inspect` will print both.
+
+## Computes in onchange drafts
+
+A draft can lack a required relation (a new line before its order is chosen). For those records the compute is
+skipped and the field stays empty until the relation is given, so inside a compute a required many2one in
+`depends` is always set: write `l.order.currency.id`, not `l.order?.currency.id`.

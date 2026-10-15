@@ -23,6 +23,7 @@ import {
   type Id,
   InvalidModelError,
   InvalidRelationError,
+  MissingRecordError,
   partitionStatements,
   rangePartitions,
   toDecimal,
@@ -80,6 +81,23 @@ const StockMove = defineModel('stock.move', {
     }),
   },
 });
+// An import-shaped document with lines (feedback #20).
+const Batch = defineModel('x.batch', {
+  access: { 'base.user': ['read', 'create', 'import'] },
+  fields: { name: f.char({ required: true }), lines: f.one2many('x.batch.line', 'batch') },
+});
+const BatchLine = defineModel('x.batch.line', {
+  access: { 'base.user': ['read', 'create', 'import'] },
+  fields: {
+    batch: f.many2one('x.batch', { required: true, ondelete: 'cascade' }),
+    qty: f.integer({ required: true }),
+  },
+});
+// References into a partitioned model: no database foreign key, ids checked by the ORM (feedback #22).
+const MoveNote = defineModel('stock.move.note', {
+  access: { 'base.user': ['read', 'create', 'write'] },
+  fields: { move: f.many2one('stock.move', { required: true, foreignKey: false }), text: f.char() },
+});
 const registry = buildRegistry({
   modules: [
     defineModule({
@@ -89,7 +107,7 @@ const registry = buildRegistry({
         defineGroup({ code: 'base.importer', implies: ['base.user'] }),
       ],
       sequences: [defineSequence({ code: 'product', prefix: 'P', padding: 4 })],
-      models: [Users, Currency, Company, Product, StockMove],
+      models: [Users, Currency, Company, Product, StockMove, MoveNote, Batch, BatchLine],
     }),
   ],
 });
@@ -234,5 +252,59 @@ describe('partitioning', () => {
     await expect(
       as(['base.user'], (env) => env.model('stock.move').create([{ date: '2027-01-01', product }])),
     ).rejects.toThrow(/No partition accepts the row/);
+  });
+});
+
+describe('references into partitioned models', () => {
+  test('foreignKey: false: no database constraint, written ids are checked by the ORM', async () => {
+    const [move] = await driver.query<{ id: number }>(
+      compile(sql`SELECT id FROM stock_move ORDER BY id LIMIT 1`),
+    );
+    const fks = await driver.query<{ def: string }>(
+      compile(
+        sql`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'stock_move_note'::regclass AND contype = 'f'`,
+      ),
+    );
+    expect(fks.map((r) => r.def).filter((d) => d.includes('(move_id)'))).toEqual([]); // only created_by / updated_by have keys
+    await as(['base.user'], async (env) => {
+      const notes = env.model('stock.move.note');
+      const [note] = await notes.create([
+        { move: Number(move?.id) as Id<'stock.move'>, text: 'ok' },
+      ]);
+      await expect(notes.create([{ move: 999_999 as Id<'stock.move'> }])).rejects.toBeInstanceOf(
+        MissingRecordError,
+      );
+      await expect(
+        note?.write({ move: 888_888 as Id<'stock.move'> }) ?? Promise.resolve(),
+      ).rejects.toBeInstanceOf(MissingRecordError);
+    });
+    expect(() => f.many2one('stock.move', { foreignKey: false, ondelete: 'cascade' })).toThrow(
+      /cannot set ondelete/,
+    );
+  });
+});
+
+describe('copy with lines', () => {
+  test('x2many create commands are COPY-loaded after their parents, in order', async () => {
+    await as(['base.user'], async (env) => {
+      const before = env.stats().queries;
+      const batches = await env.model('x.batch').copy(
+        Array.from({ length: 50 }, (_, i) => ({
+          name: `B${i}`,
+          lines: { create: [{ qty: i }, { qty: i * 10 }] },
+        })),
+      );
+      expect(batches.length).toBe(50);
+      expect(env.stats().queries - before).toBeLessThan(15); // not one statement per batch or line
+      const loaded = await env
+        .model('x.batch')
+        .browse([...batches.ids])
+        .load({ lines: ['qty'] });
+      expect(loaded.map((b) => [b.name, b.lines.mapped('qty')])[7]).toEqual(['B7', [7, 70]]);
+    });
+    const [n] = await driver.query<{ n: number }>(
+      compile(sql`SELECT count(*)::int AS n FROM x_batch_line`),
+    );
+    expect(n?.n).toBe(100);
   });
 });

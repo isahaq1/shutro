@@ -738,10 +738,12 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
       const target = targetOf(field);
       if (target !== undefined) {
         const other = resolve(fromModule, target, where);
-        if (field.kind !== 'one2many' && other.model.partition !== undefined) {
+        const withoutKey =
+          field.kind === 'many2one' && (field as { foreignKey?: boolean }).foreignKey === false;
+        if (field.kind !== 'one2many' && other.model.partition !== undefined && !withoutKey) {
           throw new InvalidRelationError(
             `${where} points at '${target}', which is partitioned.`,
-            'A foreign key cannot reference a partitioned table without its partition key: reference a non-partitioned model, or store the id in a plain integer field.',
+            'A foreign key cannot reference a partitioned table without its partition key: use f.many2one(target, { foreignKey: false }) (ids checked by the ORM), or reference a non-partitioned model.',
           );
         }
         if (field.kind === 'one2many') {

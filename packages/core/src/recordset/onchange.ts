@@ -193,7 +193,20 @@ async function computeAll(
   for (const f of fields) {
     if (done.has(f.compute)) continue;
     done.add(f.compute);
-    await computeFields(host, model, ids, [f]);
+    // A draft may not have a required relation yet (a new line without its order): skip the compute for those
+    // records, so inside a compute a required many2one in `depends` is always set (feedback #4). The field stays
+    // empty in the draft until the relation is given.
+    const ready = ids.filter((id) => {
+      const values = host.values(model.name, id);
+      return f.paths.every((path) => {
+        const first = path[0];
+        if (first === undefined || path.length < 2 || first.kind !== 'many2one') return true;
+        if (model.fields[first.key]?.required !== true) return true;
+        const value = values?.get(first.key);
+        return value !== null && value !== undefined;
+      });
+    });
+    await computeFields(host, model, ready, [f]);
   }
 }
 
