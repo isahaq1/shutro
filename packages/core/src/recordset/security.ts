@@ -34,6 +34,8 @@ export function canAccess(internals: ScopeInternals, model: AnyModel, perm: Perm
     return true;
   if (allowed(model.access, internals.env.groups, perm)) return true;
   if (internals.env.grants.has(`${model.name}:${perm}`)) return true; // a special permission of this user
+  for (const [role, perms] of internals.overlay?.access.get(model.name) ?? [])
+    if (perms.has(perm) && internals.env.groups.has(role)) return true; // a runtime grant (RFC 0014 §7.10)
   if (internals.registry.security.mode !== 'warn') return false;
   internals.registry.security.denied(
     `[enforce: 'warn'] ${perm} access to ${model.name} would be denied for groups ${[...internals.env.groups].join(', ') || '(none)'}: add it to the model's access.`,
@@ -64,6 +66,8 @@ export function hasPermission(internals: ScopeInternals, code: string): boolean 
   const { env } = internals;
   if (env.su || env.administrator || !internals.registry.security.enforce) return true;
   if (permission.groups.some((g) => env.groups.has(g)) || env.grants.has(code)) return true;
+  for (const role of internals.overlay?.permissions.get(code) ?? [])
+    if (env.groups.has(role)) return true;
   if (internals.registry.security.mode !== 'warn') return false;
   internals.registry.security.denied(
     `[enforce: 'warn'] permission '${code}' would be denied for groups ${[...env.groups].join(', ') || '(none)'}.`,
@@ -220,7 +224,11 @@ export function ruleConditions(
 ): SqlFragment[] {
   const { env } = internals;
   if (env.su || env.administrator || !internals.registry.security.enforce) return [];
-  const { globals, groupRules, hasGroupRules } = applicableRules(model.rules, env.groups, perm);
+  const { globals, groupRules, hasGroupRules } = applicableRules(
+    { ...model.rules, ...(internals.overlay?.rules.get(model.name) ?? {}) },
+    env.groups,
+    perm,
+  );
   const placeholders = { uid: env.uid, companyId: env.companyId, companyIds: env.companyIds };
   const out: SqlFragment[] = [];
   for (const rule of globals) {

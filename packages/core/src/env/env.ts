@@ -8,11 +8,12 @@ import {
   isRetryable,
   type Row,
 } from '@shutro/driver-pg';
-import type { KeyRing, Perm } from '@shutro/security';
+import type { KeyRing, Perm, RulePerm } from '@shutro/security';
 import { InvalidSequenceError } from '@shutro/sequence';
 import { compile, sql as sqlTag } from '@shutro/sql';
 import { refId } from '../data/load.js';
 import {
+  AccessError,
   CompanyNotAllowedError,
   ConcurrentUpdateError,
   FlagNotAllowedError,
@@ -23,7 +24,7 @@ import {
 } from '../errors.js';
 import type { Id } from '../model/id.js';
 import { createFx, type Fx } from '../money/fx.js';
-import { trackElevation, trackSuperuser } from '../recordset/audit.js';
+import { trackElevation, trackSecurityChange, trackSuperuser } from '../recordset/audit.js';
 import { invalidateCached } from '../recordset/compute.js';
 import {
   companyCurrencyId,
@@ -43,6 +44,16 @@ import {
 import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ListLoaded, ModelName, ModelRef, RecordSet } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
+import {
+  changeStatement,
+  closureWith,
+  isAdministratorWith,
+  loadRuntimeSecurity,
+  type RuntimeSecurity,
+  SECURITY_CHANNEL,
+  type SecurityChange,
+  validateChange,
+} from '../security/runtime.js';
 import {
   assertGrants,
   assertLang,
@@ -169,12 +180,20 @@ interface Runtime {
   readonly keys: KeyRing | undefined;
   /** The language translations fall back to (RFC 0011). */
   readonly sourceLang: string;
+  /** Runtime security (RFC 0014 §7.10): the loaded overlay, when enabled. */
+  readonly security: {
+    enabled: boolean;
+    current: RuntimeSecurity | undefined;
+    loading: Promise<void> | undefined;
+  };
 }
 
 /** @internal What the recordset runtime needs from an environment. */
 export interface ScopeInternals {
   readonly env: Env;
   readonly registry: Registry;
+  /** Runtime security additions (RFC 0014 §7.10), when enabled. */
+  readonly overlay: RuntimeSecurity | undefined;
   readonly cache: RecordCache;
   readonly uid: number;
   readonly now: Date;
@@ -304,8 +323,10 @@ export class Env<S = unknown> {
     this.groups =
       runtime.registry === undefined
         ? new Set(identity.groups)
-        : runtime.registry.security.closure(identity.groups);
-    this.administrator = runtime.registry?.security.isAdministrator(this.groups) === true;
+        : closureWith(runtime.registry, runtime.security.current, identity.groups);
+    this.administrator =
+      runtime.registry !== undefined &&
+      isAdministratorWith(runtime.registry, runtime.security.current, this.groups);
     this.grants = new Set(identity.grants);
     this.keys = runtime.keys;
     this.tz = identity.tz;
@@ -326,6 +347,7 @@ export class Env<S = unknown> {
         registry,
         (q) => this.#query(q),
         runtime.driver,
+        runtime.security.current,
       );
     });
     Object.freeze(this);
@@ -378,6 +400,47 @@ export class Env<S = unknown> {
   /** The id of the record with external id `id`. @throws {UnknownExternalIdError} */
   async refId<M extends ModelName<S>>(model: M, id: string): Promise<Id<M>> {
     return refId(this as unknown as Env, model, id);
+  }
+
+  /**
+   * Runtime security administration (RFC 0014 §7.10): roles, model access, record rules and permission grants, on top
+   * of the code's declarations. Administrators (or superuser scopes) only; each change is validated against the
+   * registry, audited, and reloaded by every process once committed. Needs `createShutro({ runtimeSecurity: true })`.
+   */
+  get securityAdmin(): SecurityAdmin {
+    const apply = async (change: SecurityChange): Promise<void> => {
+      const scope = internalsOf(this as unknown as Env);
+      if (!this.#runtime.security.enabled)
+        throw new InvalidIdentityError(
+          'Runtime security is not enabled.',
+          'Pass runtimeSecurity: true to createShutro.',
+        );
+      if (!this.su && !this.administrator)
+        throw new AccessError('security', 'manage', {
+          problem: 'only administrators can change roles, access and rules.',
+          hint: 'Use an administrator account (defineGroup({ administrator: true })).',
+        });
+      // Read through this transaction: roles saved earlier in it count.
+      const overlay = await loadRuntimeSecurity({
+        query: <R extends Row>(q: DriverQuery) => scope.query<R>(q),
+      });
+      validateChange(scope.registry, overlay, change);
+      await scope.query(changeStatement(change));
+      await scope.query(compile(sqlTag`SELECT pg_notify(${SECURITY_CHANNEL}, '')`));
+      trackSecurityChange(scope, change);
+      this.afterCommit(async () => {
+        this.#runtime.security.current = await loadRuntimeSecurity(this.#runtime.driver);
+      });
+    };
+    return {
+      saveRole: (role) => apply({ kind: 'role', ...role }),
+      deleteRole: (code) => apply({ kind: 'deleteRole', code }),
+      setAccess: (role, model, perms) => apply({ kind: 'access', role, model, perms }),
+      saveRule: (rule) => apply({ kind: 'rule', ...rule }),
+      deleteRule: (name) => apply({ kind: 'deleteRule', name }),
+      grantPermission: (role, permission) => apply({ kind: 'permission', role, permission }),
+      revokePermission: (role, permission) => apply({ kind: 'revokePermission', role, permission }),
+    };
   }
 
   /** Dated, per-company currency conversion (RFC 0006 §7.6). Needs a `res.currency.rate` model. */
@@ -646,6 +709,7 @@ function scopeInternals(
   registry: Registry,
   query: <R extends Row>(q: DriverQuery) => Promise<readonly R[]>,
   driver: Driver,
+  overlay: RuntimeSecurity | undefined,
 ): ScopeInternals {
   const root = scope.root;
   const dirtyOf = (model: string, id: number): Set<string> | undefined =>
@@ -671,6 +735,7 @@ function scopeInternals(
   const self: ScopeInternals = {
     env,
     registry,
+    overlay,
     cache: root.cache,
     uid: root.uid,
     now: root.now,
@@ -836,6 +901,11 @@ export interface ShutroOptions<S> {
    * outside the allowed set and groups the user does not have, and uses the loaded groups when none are given.
    */
   readonly identity?: (uid: number) => Promise<VerifiedIdentity | null>;
+  /**
+   * Roles, access, record rules and permission grants edited at runtime (RFC 0014 §7.10), on top of the code's
+   * declarations. Loaded at the first run and reloaded whenever a change is committed (by any process).
+   */
+  readonly runtimeSecurity?: boolean;
   /** Retry policy for serialization failures and deadlocks. Default: 5 attempts with jittered exponential backoff. */
   readonly retry?: {
     readonly attempts?: number;
@@ -855,6 +925,33 @@ export interface BootstrapOptions {
   readonly reason: string;
   /** Current company, once one exists; company-scoped defaults and sequences use it. */
   readonly company?: number;
+}
+
+/** `env.securityAdmin` (RFC 0014 §7.10). */
+export interface SecurityAdmin {
+  /** Creates or updates a runtime role. */
+  saveRole(role: {
+    readonly code: string;
+    readonly label?: string;
+    readonly implies?: readonly string[];
+    readonly administrator?: boolean;
+  }): Promise<void>;
+  /** Deletes a runtime role with its access, rules and grants. */
+  deleteRole(code: string): Promise<void>;
+  /** Sets what `role` may do on `model` (an empty list removes the runtime grant; code grants stay). */
+  setAccess(role: string, model: string, perms: readonly Perm[]): Promise<void>;
+  /** Creates or updates a record rule for `role` (the domain is compiled when saved). */
+  saveRule(rule: {
+    readonly name: string;
+    readonly role: string;
+    readonly model: string;
+    readonly perms: readonly RulePerm[];
+    readonly domain: Readonly<Record<string, unknown>>;
+  }): Promise<void>;
+  deleteRule(name: string): Promise<void>;
+  /** Grants a feature permission (declared by a module) to `role`. */
+  grantPermission(role: string, permission: string): Promise<void>;
+  revokePermission(role: string, permission: string): Promise<void>;
 }
 
 /** What an identity loader returns for a user. */
@@ -896,6 +993,8 @@ export interface Shutro<S = unknown> {
   currentEnv(): Env<S>;
   /** The registry this instance was created with. */
   readonly registry: Registry | undefined;
+  /** Reloads runtime security now (changes are also reloaded automatically after they commit). */
+  reloadSecurity(): Promise<void>;
 }
 
 const defaultBackoff = (attempt: number): number =>
@@ -938,11 +1037,27 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
     driver: options.driver,
     keys: options.keys,
     inspector: options.inspector,
+    security: { enabled: options.runtimeSecurity === true, current: undefined, loading: undefined },
   };
   const NOW = compile(sqlTag`SELECT now() AS now`);
+  const reload = async (): Promise<void> => {
+    runtime.security.current = await loadRuntimeSecurity(options.driver);
+  };
+  const ensureSecurity = async (): Promise<void> => {
+    if (!runtime.security.enabled || runtime.security.current !== undefined) return;
+    runtime.security.loading ??= (async () => {
+      await reload();
+      // Every process reloads when any of them commits a change.
+      await options.driver.listen(SECURITY_CHANNEL, () => {
+        reload().catch((error: unknown) => runtime.onHookError(error, 'afterCommit'));
+      });
+    })();
+    await runtime.security.loading;
+  };
 
   return {
     async run<T>(runOptions: RunOptions, fn: (env: Env<S>) => Promise<T>): Promise<T> {
+      await ensureSecurity();
       let identity = resolveIdentity(runOptions);
       if (options.identity !== undefined) {
         const verified = await options.identity(identity.uid);
@@ -1006,6 +1121,7 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
     },
 
     registry: options.registry as Registry | undefined,
+    reloadSecurity: reload,
 
     currentEnv(): Env<S> {
       const scope = runtime.als.getStore();
@@ -1023,10 +1139,10 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
       const groups =
         options.registry === undefined
           ? new Set(identity.groups)
-          : (options.registry as Registry).security.closure(identity.groups);
+          : closureWith(options.registry as Registry, runtime.security.current, identity.groups);
       const administrator =
         options.registry !== undefined &&
-        (options.registry as Registry).security.isAdministrator(groups);
+        isAdministratorWith(options.registry as Registry, runtime.security.current, groups);
       const maxAttempts = runOptions.retry === false ? 1 : attempts;
       for (let attempt = 1; ; attempt++) {
         let scope: Scope | undefined;

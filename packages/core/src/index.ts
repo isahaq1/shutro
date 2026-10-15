@@ -74,6 +74,7 @@ export {
   type Hook,
   type RunOptions,
   type ScopeStats,
+  type SecurityAdmin,
   type Shutro,
   type ShutroOptions,
 } from './env/env.js';
@@ -335,3 +336,11 @@ export {
   type SecurityOptions,
   targetOf,
 } from './registry/registry.js';
+export {
+  loadRuntimeSecurity,
+  type RuntimeRole,
+  type RuntimeRule,
+  type RuntimeSecurity,
+  runtimeSecurityStatements,
+  SECURITY_CHANNEL,
+} from './security/runtime.js';

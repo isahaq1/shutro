@@ -110,6 +110,31 @@ createInvoices: method('sale.order', { elevate: ['sale.order.line:read'], reason
 Each call writes an `elevate` audit row (reason, grants). The grants exist only inside the call; record rules, field
 groups and company scoping still apply. `env.withGrants({ grants, reason }, fn)` is the same thing for any code.
 
+## Roles, access and rules edited at runtime
+
+Code declarations are the reviewed baseline. With `createShutro({ runtimeSecurity: true })`, administrators extend
+them while the system runs:
+
+```ts
+await shutro.run({ user: adminId, company: 1, groups: ['base.admin'] }, async (env) => {
+  const admin = env.securityAdmin;
+  await admin.saveRole({ code: 'sale.team_lead', label: 'Team lead', implies: ['sale.user'] });
+  await admin.setAccess('sale.team_lead', 'sale.order', ['read', 'write', 'create', 'unlink']);
+  await admin.saveRule({ name: 'team_orders', role: 'sale.team_lead', model: 'sale.order', perms: ['read', 'write'],
+    domain: { 'user.team': { $env: 'uid' } } });
+  await admin.grantPermission('sale.team_lead', 'sale.discount_approve');
+});
+```
+
+- Only administrators (or superuser scopes) can change them. Every change is **validated when saved**: the role
+  and model must exist, permissions must be declared by a module, and the rule domain is compiled against the model.
+  A broken rule is refused instead of failing for users later.
+- Additive: runtime grants and rules add to the code's; they never remove a code grant (change those in the module).
+  Runtime roles can be administrator roles and can imply code groups.
+- Each change is audited (`security` rows) and announced with `NOTIFY shutro_security` on commit; every process
+  using `runtimeSecurity` reloads. Assign runtime roles to users like any group (identity loader / `groups`).
+- Runtime rules apply in the ORM; generated RLS policies cover the code's rules only.
+
 ## Back-dated entries
 
 ```ts

@@ -188,6 +188,22 @@ export function trackElevation(
   });
 }
 
+/** Records a runtime security change (RFC 0014 §7.10). */
+export function trackSecurityChange(internals: ScopeInternals, change: object): void {
+  if (!internals.env.flags.tracking) return;
+  internals.auditRows.push({
+    ...base(internals),
+    su: internals.env.su,
+    reason: null,
+    action: 'security',
+    model: null,
+    recordId: null,
+    field: null,
+    old: null,
+    new: change,
+  });
+}
+
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
