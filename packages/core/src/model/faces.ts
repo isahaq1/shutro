@@ -22,7 +22,9 @@ type Mandatory<F> =
       ? false
       : FlagsOfField<F>['sequence'] extends true
         ? false
-        : true
+        : FlagsOfField<F>['computed'] extends true
+          ? false // a computed field with an inverse is writable, but the compute fills it (RFC 0008 §7.5)
+          : true
     : false;
 
 type WriteValue<F> = Required<F> extends true ? Write<F> : Write<F> | null;

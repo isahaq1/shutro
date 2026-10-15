@@ -1,27 +1,19 @@
 /**
  * Writes (RFC 0004 §7.6): `create()` inserts immediately, `write()` goes through the unit of work and is flushed in
- * set-based statements, `unlink()` deletes immediately. Every change is journaled for savepoint rollback.
+ * set-based statements, `unlink()` deletes immediately. Every change is journaled for savepoint rollback and
+ * recorded as a compute trigger (RFC 0008 §7.2).
  */
 
 import { compile, type SqlFragment, sql } from '@shutro/sql';
-import { Decimal as DecimalJs } from 'decimal.js';
 import type { ScopeInternals } from '../env/env.js';
-import {
-  CurrencyMismatchError,
-  MissingRecordError,
-  UomMismatchError,
-  ValidationError,
-} from '../errors.js';
+import { MissingRecordError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
-import { toDecimal } from '../money/decimal.js';
-import { Money } from '../money/money.js';
-import { Quantity } from '../money/quantity.js';
 import { targetOf } from '../registry/registry.js';
 import { junctionTable } from './relations.js';
+import { arrayType, bindValue, fail, normalize } from './values.js';
 
 const CHUNK = 1000;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** What the write runtime needs from the recordset runtime (passed in to avoid a module cycle). */
 export interface WriteHost {
@@ -40,149 +32,14 @@ export interface WriteHost {
   values(model: string, id: number, create?: boolean): Map<string, unknown> | undefined;
   /** Children of an x2many relation, loading them if needed. */
   children(model: AnyModel, id: number, key: string): Promise<number[]>;
+  /** A recordset of `ids` (for inverse functions). */
+  recordset(model: AnyModel, ids: readonly number[]): unknown;
 }
 
 type Row = Readonly<Record<string, unknown>>;
 
-function fail(model: AnyModel, fields: readonly string[], problem: string, hint: string): never {
-  throw new ValidationError(model.name, fields, problem, hint);
-}
-
 function isX2Many(field: Field): boolean {
   return field.kind === 'one2many' || field.kind === 'many2many';
-}
-
-/** The PostgreSQL array element type for a field (for `unnest($n::type[])`). */
-function arrayType(field: Field): string {
-  if (field.kind === 'many2one') return 'bigint';
-  return field.pgType;
-}
-
-/** Converts a cached value into what the driver binds. */
-export function bindValue(field: Field, value: unknown): unknown {
-  if (value === null || value === undefined) return null;
-  if (DecimalJs.isDecimal(value)) return (value as DecimalJs).toFixed();
-  // Inside arrays, postgres.js would type a Date as a scalar timestamptz; an ISO string lets the ::timestamptz[] cast apply.
-  if (value instanceof Date) return value.toISOString();
-  if (field.kind === 'json') return JSON.stringify(value);
-  return value;
-}
-
-/**
- * Validates and normalizes one value for storage in the cache. `currencyOf` / `uomOf` give the record's current
- * currency / unit id for `Money` / `Quantity` checks.
- */
-function normalize(
-  model: AnyModel,
-  key: string,
-  field: Field,
-  value: unknown,
-  siblings: (key: string) => unknown,
-): unknown {
-  const bad = (what: string, hint: string): never =>
-    fail(model, [key], `field '${key}' ${what}.`, hint);
-  if (value === null) {
-    if (field.required) bad('is required and cannot be null', 'Give the field a value.');
-    return null;
-  }
-  switch (field.kind) {
-    case 'many2one': {
-      if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value;
-      const ids = (value as { ids?: readonly number[] }).ids;
-      if (Array.isArray(ids) && ids.length === 1) return ids[0];
-      return bad(
-        `expects a record id (got ${typeof value})`,
-        'Pass the id of the related record, or a single record.',
-      );
-    }
-    case 'monetary': {
-      if (value instanceof Money) {
-        const currencyId = siblings((field as unknown as { currencyField: string }).currencyField);
-        if (typeof currencyId !== 'number') {
-          bad(
-            "is given as Money but the record's currency is not known",
-            'Load the currency field first, or write a Decimal / string amount.',
-          );
-        }
-        if (value.currency.id !== currencyId) {
-          throw new CurrencyMismatchError(
-            `Cannot write ${value.toString()} to ${model.name}.${key}: the record's currency is a different one (id ${String(currencyId)}).`,
-            "Convert the amount to the record's currency first (env.fx.convert with the document date), or write the record's currency field in the same write.",
-          );
-        }
-        return value.amount;
-      }
-      return decimalOf(model, key, value);
-    }
-    case 'quantity': {
-      if (value instanceof Quantity) {
-        const uomId = siblings((field as unknown as { uomField: string }).uomField);
-        if (value.uom.id !== uomId) {
-          throw new UomMismatchError(
-            `Cannot write ${value.toString()} to ${model.name}.${key}: the record's unit is a different one (id ${String(uomId)}).`,
-            "Convert the quantity with .to(uom) first, or write the record's unit field in the same write.",
-          );
-        }
-        return value.value;
-      }
-      return decimalOf(model, key, value);
-    }
-    case 'decimal':
-      return decimalOf(model, key, value);
-    case 'integer':
-      return typeof value === 'number' && Number.isSafeInteger(value)
-        ? value
-        : bad('expects an integer', 'Pass a safe integer number.');
-    case 'bigint':
-      return typeof value === 'bigint' || (typeof value === 'number' && Number.isSafeInteger(value))
-        ? value
-        : bad('expects an integer', 'Pass a bigint or a safe integer.');
-    case 'boolean':
-      return typeof value === 'boolean' ? value : bad('expects true or false', 'Pass a boolean.');
-    case 'char':
-    case 'text':
-    case 'html':
-      return typeof value === 'string' ? value : bad('expects a string', 'Pass a string.');
-    case 'date':
-      return typeof value === 'string' && DATE.test(value)
-        ? value
-        : bad(
-            "expects a 'YYYY-MM-DD' string",
-            "Pass a calendar date such as '2026-10-15', never a JS Date.",
-          );
-    case 'datetime':
-      return value instanceof Date && !Number.isNaN(value.getTime())
-        ? value
-        : bad('expects a Date', 'Pass a valid JS Date (stored in UTC).');
-    case 'selection':
-    case 'state': {
-      const selection = (
-        field as unknown as {
-          selection: readonly (readonly [string, string])[] | (() => readonly string[]);
-        }
-      ).selection;
-      const allowed = typeof selection === 'function' ? selection() : selection.map(([k]) => k);
-      return typeof value === 'string' && allowed.includes(value)
-        ? value
-        : bad(`expects one of ${allowed.join(', ')}`, `Got ${JSON.stringify(value)}.`);
-    }
-    case 'binary':
-      return value instanceof Uint8Array ? value : bad('expects bytes', 'Pass a Uint8Array.');
-    default:
-      return value;
-  }
-}
-
-function decimalOf(model: AnyModel, key: string, value: unknown): DecimalJs {
-  try {
-    return toDecimal(value as never);
-  } catch (e) {
-    const hint =
-      e instanceof Error && 'hint' in e
-        ? String((e as { hint: unknown }).hint)
-        : 'Pass a decimal string or a Decimal.';
-    return fail(model, [key], `field '${key}' expects an exact decimal.`, hint);
-  }
 }
 
 /** Resolves a field default (a value or `(env) => value`). */
@@ -190,6 +47,28 @@ function defaultOf(field: Field, env: ScopeInternals['env']): unknown {
   return typeof field.default === 'function'
     ? (field.default as (env: unknown) => unknown)(env)
     : field.default;
+}
+
+/** A many2one of `model` changed: the one2many lists of the old / new parents changed too (RFC 0008 §7.1). */
+function triggerParents(
+  internals: ScopeInternals,
+  model: AnyModel,
+  key: string,
+  parents: readonly unknown[],
+): void {
+  const ids = parents.filter((p): p is number => typeof p === 'number');
+  if (ids.length === 0) return;
+  const target = targetOf(model.fields[key] as Field);
+  if (target === undefined) return;
+  const parentModel = internals.registry.get(target).model;
+  for (const [pKey, pField] of Object.entries(parentModel.fields)) {
+    if (
+      pField.kind === 'one2many' &&
+      (pField as unknown as { inverseField: string }).inverseField === key &&
+      targetOf(pField) === model.name
+    )
+      internals.trigger(parentModel.name, pKey, ids);
+  }
 }
 
 /** Splits a row into normalized stored values and x2many commands, validating keys. */
@@ -279,7 +158,8 @@ export async function createRecords(
       if (key === 'createdAt' || key === 'updatedAt') value = internals.now;
       else if (key === 'createdBy' || key === 'updatedBy') value = internals.uid;
       else value = defaultOf(field, internals.env) ?? null;
-      if (value === null && field.required) missing.push(key);
+      // Stored computes are filled after the insert (RFC 0008 §7.6).
+      if (value === null && field.required && !field.computed) missing.push(key);
       stored.set(
         key,
         value === null ? null : normalize(model, key, field, value, (k) => stored.get(k)),
@@ -313,13 +193,29 @@ export async function createRecords(
     for (const r of rowsOut) ids.push(Number(r.id));
   }
 
+  const parentsByKey = new Map<string, unknown[]>();
   prepared.forEach((p, i) => {
     const id = ids[i] as number;
     const values = host.values(model.name, id, true) as Map<string, unknown>;
-    for (const [key, value] of p.stored) values.set(key, value);
+    for (const [key, value] of p.stored) {
+      // Stored computes are not cached yet: reading one before the flush point says so (RFC 0008 §7.2).
+      if (!(model.fields[key] as Field).computed) values.set(key, value);
+      if ((model.fields[key] as Field).kind === 'many2one' && value !== null)
+        parentsByKey.set(key, [...(parentsByKey.get(key) ?? []), value]);
+    }
     internals.journal({ kind: 'created', model: model.name, id });
   });
   await host.ensureValueObjects(model, ids, new Set(columns));
+
+  // Triggers: every stored value of a new record "changed"; its own stored computes are computed at the next flush point.
+  for (const key of columns) {
+    const field = model.fields[key] as Field;
+    if (field.computed) continue;
+    internals.trigger(model.name, key, ids);
+  }
+  for (const [key, parents] of parentsByKey) triggerParents(internals, model, key, parents);
+  for (const f of internals.registry.compute.stored(model.name))
+    internals.markToCompute(model.name, f.key, ids);
 
   for (const [i, p] of prepared.entries()) {
     for (const [key, commands] of p.commands)
@@ -339,7 +235,7 @@ export async function writeRecords(
 ): Promise<void> {
   const { internals } = host;
   if (ids.length === 0) return;
-  // Money / Quantity checks need the sibling currency / uom values.
+  // Money / Quantity checks need the sibling currency / uom values; a moved record needs its old parent.
   const needed = new Set<string>();
   for (const key of Object.keys(values)) {
     const field = model.fields[key] as
@@ -347,16 +243,23 @@ export async function writeRecords(
       | undefined;
     if (field?.currencyField !== undefined) needed.add(field.currencyField);
     if (field?.uomField !== undefined) needed.add(field.uomField);
+    if (field?.kind === 'many2one' && internals.registry.compute.inverseKeys(model.name).has(key))
+      needed.add(key);
   }
   if (needed.size > 0) await host.fetch(model, ids, needed);
 
+  const changedByKey = new Map<string, number[]>();
+  const parentsByKey = new Map<string, unknown[]>();
+  const inverses = new Set<string>();
   for (const id of ids) {
     const { stored, commands } = splitRow(model, values, 'write', host, id);
     const cached = host.values(model.name, id, true) as Map<string, unknown>;
     for (const [key, value] of stored) {
       const field = model.fields[key] as Field;
-      if (field.kind === 'many2one')
+      if (field.kind === 'many2one') {
         invalidateInverseLists(host, model, key, cached.get(key), value);
+        parentsByKey.set(key, [...(parentsByKey.get(key) ?? []), cached.get(key), value]);
+      }
       internals.journal({
         kind: 'value',
         model: model.name,
@@ -368,8 +271,16 @@ export async function writeRecords(
       });
       cached.set(key, value);
       internals.markDirty(model.name, id, key);
+      changedByKey.set(key, [...(changedByKey.get(key) ?? []), id]);
+      if (field.computed && field.inverse !== undefined) inverses.add(key);
     }
     for (const [key, cmds] of commands) await applyCommands(host, model, id, key, cmds, 'write');
+  }
+  for (const [key, changed] of changedByKey) internals.trigger(model.name, key, changed);
+  for (const [key, parents] of parentsByKey) triggerParents(internals, model, key, parents);
+  for (const key of inverses) {
+    const inverse = (model.fields[key] as Field).inverse as (records: unknown) => unknown;
+    await inverse(host.recordset(model, ids));
   }
 }
 
@@ -408,6 +319,16 @@ export async function unlinkRecords(
   const { internals } = host;
   if (ids.length === 0) return;
   await internals.flush(model.name);
+  // The parents of deleted children recompute (RFC 0008 §7.1): remember them before the rows go.
+  const inverseKeys = [...internals.registry.compute.inverseKeys(model.name)];
+  if (inverseKeys.length > 0) await host.fetch(model, ids, new Set(inverseKeys));
+  const parentsByKey = new Map<string, unknown[]>();
+  for (const key of inverseKeys) {
+    parentsByKey.set(
+      key,
+      ids.map((id) => host.values(model.name, id)?.get(key)),
+    );
+  }
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const rows = await internals.query<{ id: number }>(
@@ -444,6 +365,7 @@ export async function unlinkRecords(
       }
     }
   }
+  for (const [key, parents] of parentsByKey) triggerParents(internals, model, key, parents);
 }
 
 // --------------------------------------------------------------------------------------------- x2many ops
@@ -538,6 +460,7 @@ async function applyCommands(
       }
     }
     parentValues.set(key, [...current]);
+    internals.trigger(model.name, key, [parentId]);
     return;
   }
 
@@ -620,6 +543,7 @@ async function applyCommands(
     }
   }
   parentValues.set(key, [...current]);
+  internals.trigger(model.name, key, [parentId]);
 }
 
 // -------------------------------------------------------------------------------------------------- flush
@@ -634,7 +558,9 @@ export async function flushDirty(host: WriteHost, modelName?: string): Promise<v
     const model = internals.registry.get(name).model;
     const groups = new Map<string, { fields: string[]; ids: number[] }>();
     for (const [id, fields] of dirty) {
-      const sorted = [...fields].sort();
+      // A value invalidated by a trigger and not recomputed yet must not be written as null.
+      const sorted = [...fields].filter((k) => host.values(name, id)?.has(k)).sort();
+      if (sorted.length === 0) continue;
       const key = sorted.join(',');
       let group = groups.get(key);
       if (group === undefined) {

@@ -36,7 +36,7 @@ function columnDdl(model: AnyModel, key: string, field: Field, column: string): 
     return parts.join(' ');
   }
   parts.push(typeName(field, model.name, key));
-  if (field.required) parts.push('NOT NULL');
+  if (field.required && !field.computed) parts.push('NOT NULL'); // stored computes are filled after insert (RFC 0008 §7.6)
   if (field.kind === 'boolean' && typeof field.default === 'boolean')
     parts.push(`DEFAULT ${field.default ? 'TRUE' : 'FALSE'}`);
   if (field.kind === 'integer' && typeof field.default === 'number')

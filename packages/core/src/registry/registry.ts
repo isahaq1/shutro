@@ -29,6 +29,8 @@ import { isModule, type Module, type ModuleBase } from './module.js';
 
 // ------------------------------------------------------------------------------------------------- schema types
 
+import { buildComputeGraph, type ComputeGraph } from '../compute/graph.js';
+
 type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
   x: infer I,
 ) => void
@@ -107,6 +109,8 @@ export interface Registry<S = unknown> {
   readonly loadOrder: readonly string[];
   /** Models in load order (owning modules first, then definition order). */
   readonly models: ReadonlyMap<string, RegisteredModel>;
+  /** The compute dependency graph (RFC 0008 §9). */
+  readonly compute: ComputeGraph;
   has(name: string): boolean;
   /** @throws {UnknownModelError} */
   get(name: string): RegisteredModel;
@@ -538,6 +542,7 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
 
   const registry: Registry<Simplify<SchemaOfModules<Mods>>> = {
     modules: Object.freeze(modules),
+    compute: buildComputeGraph(models),
     loadOrder: Object.freeze(modules.map((m) => m.name)),
     models,
     has: (name) => models.has(name),

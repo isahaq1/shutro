@@ -258,3 +258,25 @@ export interface ModelRef<S, M extends ModelName<S>> {
   /** A lazy recordset of these ids. Nothing is fetched until `load()`. */
   browse(ids: readonly number[]): PendingSet<S, M>;
 }
+
+// ------------------------------------------------------------------------------------------------ computes
+
+/** Keys of computed fields. */
+export type ComputedKeys<S, M extends ModelName<S>> = {
+  [K in Keys<S, M>]: FlagsOfField<FieldsOf<S, M>[K]>['computed'] extends true ? K : never;
+}[Keys<S, M>];
+/** A record inside a compute: computed keys are assignable (RFC 0008 §7.7). */
+export type ComputeRec<S, M extends ModelName<S>, L> = Omit<Rec<S, M, L>, ComputedKeys<S, M>> & {
+  -readonly [K in ComputedKeys<S, M>]:
+    | FieldValue<S, M, K, FieldsOf<S, M>[K], L>
+    | WriteType<FieldsOf<S, M>[K]>;
+};
+/** A recordset inside a compute: iteration yields {@link ComputeRec}. */
+export type ComputeSet<S, M extends ModelName<S>, L> = Omit<
+  RecordSet<S, M, L>,
+  typeof Symbol.iterator | 'first' | 'ensureOne'
+> & {
+  [Symbol.iterator](): Iterator<ComputeRec<S, M, L>>;
+  first(): ComputeRec<S, M, L>;
+  ensureOne(): ComputeRec<S, M, L>;
+};

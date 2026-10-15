@@ -773,3 +773,9 @@ Resolved on 2026-10-14 (the recommended option was accepted for each). The origi
 5. **Default ordering is `['id asc']`**, and `recName` defaults to `name` when the model has one.
 6. **Not yet:** `constraints.check` / `methods` receive untyped records until recordsets exist; `f.related`, `f.reference`,
    `companyDependent` and Standard Schema `validate` wait for the registry and the recordset layer.
+
+## Implementation notes (2026-10-15, computes)
+
+§7.9 semantics are fixed by RFC 0008. One face rule changed: a **required computed field with an inverse is optional
+in `create()`** (the compute fills it), so `Mandatory` excludes computed fields. The implicit `displayName` compute is
+the exported marker `defaultDisplayName`, which the engine resolves to `recName`.

@@ -15,6 +15,7 @@ import {
   NoRegistryError,
   TransactionScopeError,
 } from '../errors.js';
+import { invalidateCached } from '../recordset/compute.js';
 import { createRecordCache, flushAll, modelRef, type RecordCache } from '../recordset/recordset.js';
 import type { ModelName, ModelRef } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
@@ -102,7 +103,21 @@ interface RootScope {
   readonly cache: RecordCache;
   /** Unit of work: model → id → dirty field keys. */
   readonly dirty: Map<string, Map<number, Set<string>>>;
+  /** Raw compute triggers: model → key → changed ids (RFC 0008 §7.2). */
+  readonly triggers: Map<string, Map<string, Set<number>>>;
+  /** Records marked for computation directly (new records): model → key → ids. */
+  readonly toCompute: Map<string, Map<string, Set<number>>>;
+  readonly compute: ComputeState;
   readonly uid: number;
+}
+
+/** Compute-engine state of an attempt (RFC 0008 §7.3, §7.5). */
+export interface ComputeState {
+  recomputing: boolean;
+  /** `model.key` names being computed right now (assignment is allowed for them). */
+  readonly computing: Set<string>;
+  /** `model.key` → ids computed in the current round: invalidation and re-triggering skip them. */
+  readonly protected: Map<string, Set<number>>;
 }
 
 interface Runtime {
@@ -131,6 +146,14 @@ export interface ScopeInternals {
   forget(model: string, id: number): void;
   cachedValues(model: string): Iterable<Map<string, unknown>>;
   flush(model?: string): Promise<void>;
+  /** Records that `(model, key)` changed for `ids` and invalidates cached dependents (RFC 0008 §7.2). */
+  trigger(model: string, key: string, ids: readonly number[]): void;
+  /** Marks `ids` for computation of the stored computed field `key` (new records). */
+  markToCompute(model: string, key: string, ids: readonly number[]): void;
+  takeTriggers(): Map<string, Map<string, Set<number>>>;
+  takeToCompute(): Map<string, Map<string, Set<number>>>;
+  hasPending(): boolean;
+  readonly compute: ComputeState;
 }
 
 const internals = new WeakMap<object, () => ScopeInternals>();
@@ -425,7 +448,25 @@ function scopeInternals(
   const root = scope.root;
   const dirtyOf = (model: string, id: number): Set<string> | undefined =>
     root.dirty.get(model)?.get(id);
-  return {
+  const addIds = (
+    sets: Map<string, Map<string, Set<number>>>,
+    model: string,
+    key: string,
+    ids: readonly number[],
+  ): void => {
+    let byKey = sets.get(model);
+    if (byKey === undefined) {
+      byKey = new Map();
+      sets.set(model, byKey);
+    }
+    let set = byKey.get(key);
+    if (set === undefined) {
+      set = new Set();
+      byKey.set(key, set);
+    }
+    for (const id of ids) set.add(id);
+  };
+  const self: ScopeInternals = {
     env,
     registry,
     cache: root.cache,
@@ -465,7 +506,26 @@ function scopeInternals(
     },
     cachedValues: (model) => root.cache.records.get(model)?.values() ?? [],
     flush: (model) => flushAll(internalsOf(env), model),
+    trigger(model, key, ids) {
+      if (ids.length === 0) return;
+      addIds(root.triggers, model, key, ids);
+      invalidateCached(self, model, key, ids);
+    },
+    markToCompute: (model, key, ids) => addIds(root.toCompute, model, key, ids),
+    takeTriggers() {
+      const taken = new Map(root.triggers);
+      root.triggers.clear();
+      return taken;
+    },
+    takeToCompute() {
+      const taken = new Map(root.toCompute);
+      root.toCompute.clear();
+      return taken;
+    },
+    hasPending: () => root.triggers.size > 0 || root.toCompute.size > 0,
+    compute: root.compute,
   };
+  return self;
 }
 
 /** Reverts a rolled-back savepoint's cache changes, newest first. */
@@ -609,6 +669,9 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 queries: 0,
                 cache: createRecordCache(),
                 dirty: new Map(),
+                triggers: new Map(),
+                toCompute: new Map(),
+                compute: { recomputing: false, computing: new Set(), protected: new Map() },
                 uid: identity.uid,
               };
               const s: Scope = {

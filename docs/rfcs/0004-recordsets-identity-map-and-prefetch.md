@@ -489,3 +489,10 @@ Resolved on 2026-10-14. The original questions are kept below for context.
    otherwise type the array parameter as a scalar and defeat the `::type[]` cast.
 7. **Record rules on flush (§7.6), computes, constraints and sequences** are not implemented yet; a required field with
    a `sequence` must be given explicitly until the sequence package exists.
+
+## Implementation notes (2026-10-15, computes)
+
+RFC 0008 lands §7.4 "dependent stored computes are marked for recompute", §7.5 depends-driven loading (`dependsSpec`)
+and the compute assignment protocol. Two runtime fixes came with it: an x2many sub-spec is now loaded for children
+whose list was cached by a command (`fetchX2Many` calls `fetchMissing` for every child), and `fetchMissing` always
+ensures the currency / unit value objects, even when every column was already cached.
