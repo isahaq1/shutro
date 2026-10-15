@@ -453,3 +453,13 @@ Implemented in `packages/core/src/env/` without models or the registry. Where th
    and PostgreSQL treats them case-insensitively.
 8. **Superuser** (`asSuperuser`) is scoped to the callback. Rebinding returned recordsets to the caller's env (`Rebound<T>`)
    waits for recordsets; today plain values are returned as is.
+
+## Implementation notes (2026-10-15, multi-company)
+
+- Automatic filtering: `search()` adds `company IN allowed` (`OR company IS NULL` for optional scopes) under
+  `flags.checkCompany` (`scopingConditions`); `create()` defaults `company` to `env.companyId`.
+- Cross-company links: `f.many2one(target, { checkCompany: true })` on a companyScoped model synthesizes a
+  `companyConsistency` constraint (RFC 0009 machinery) that throws `CrossCompanyError` at the flush point when a target
+  has a company different from the record's; shared targets (no company) pass. The registry requires the target to be
+  companyScoped. `withFlags({ checkCompany: false })` (superuser) disables both the filter and the check.
+- `env.company` / `env.companies` records (§7.2) are not implemented; `companyId` / `companyIds` are.

@@ -15,8 +15,16 @@ import {
   NoRegistryError,
   TransactionScopeError,
 } from '../errors.js';
+import { createFx, type Fx } from '../money/fx.js';
 import { invalidateCached } from '../recordset/compute.js';
-import { createRecordCache, flushAll, modelRef, type RecordCache } from '../recordset/recordset.js';
+import {
+  companyCurrencyId,
+  createRecordCache,
+  currencyById,
+  flushAll,
+  modelRef,
+  type RecordCache,
+} from '../recordset/recordset.js';
 import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ModelName, ModelRef } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
@@ -251,6 +259,17 @@ export class Env<S = unknown> {
     this.#assertUsable();
     // The runtime is untyped over S; widening here is safe because it never reads S.
     return modelRef(this as unknown as Env, name) as unknown as ModelRef<S, M>;
+  }
+
+  /** Dated, per-company currency conversion (RFC 0006 §7.6). Needs a `res.currency.rate` model. */
+  get fx(): Fx {
+    const scope = internalsOf(this as unknown as Env);
+    return createFx({
+      internals: scope,
+      currency: (id) => currencyById(scope, id),
+      companyCurrency: async (company) =>
+        currencyById(scope, await companyCurrencyId(scope, company)),
+    });
   }
 
   /** The transaction timestamp (PostgreSQL `now()`), stable within an attempt. Returns a fresh `Date` each call. */

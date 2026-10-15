@@ -6,6 +6,7 @@
 import { isSql, type SqlFragment } from '@shutro/sql';
 import type { Env } from '../env/env.js';
 import { InvalidModelError } from '../errors.js';
+import { companyConsistencyCheck } from './company.js';
 import type { FlagsOfField } from './faces.js';
 import {
   type CharField,
@@ -899,6 +900,33 @@ export function defineModel<
     },
   );
 
+  // --- multi-company consistency (RFC 0003 §7.4): a synthesized constraint over the checkCompany many2ones
+  const checked = Object.entries(fields)
+    .filter(
+      ([, f]) => f.kind === 'many2one' && (f as { checkCompany?: boolean }).checkCompany === true,
+    )
+    .map(([k]) => k);
+  if (checked.length > 0) {
+    if (definition.companyScoped === undefined)
+      fail(
+        name,
+        `checkCompany on '${checked[0]}' needs a companyScoped model.`,
+        'Set companyScoped: { required: true } (or false) on the model, or drop checkCompany.',
+      );
+    if (constraints.some((c) => c.key === 'companyConsistency'))
+      fail(
+        name,
+        "'companyConsistency' is a reserved constraint key.",
+        'It is synthesized for checkCompany fields; rename yours.',
+      );
+    constraints.push({
+      key: 'companyConsistency',
+      depends: ['company', ...checked],
+      check: companyConsistencyCheck(name, checked),
+      message: 'Records must reference shared records or records of their own company.',
+    });
+  }
+
   // --- onchange handlers
   const onchange: Record<string, OnchangeFn> = {};
   for (const [key, fn] of Object.entries(definition.onchange ?? {})) {
@@ -991,6 +1019,7 @@ function describeField(
     'inverseField',
     'relation',
     'ondelete',
+    'checkCompany',
     'initial',
     'identity',
     'extensible',

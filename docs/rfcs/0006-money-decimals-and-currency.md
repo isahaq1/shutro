@@ -373,3 +373,12 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 - Exchange-difference and revaluation entries: account module design.
 - Cash rounding on payments (invoice cash-rounding lines): account module.
 - Crypto and other high-precision assets: out of scope unless an ERP use case appears.
+
+## Implementation notes (2026-10-15, conversion)
+
+`env.fx` (`packages/core/src/money/fx.ts`) implements §7.6: `convert(money, to, { date, company?, round? })` and
+`prepare({ date, currencies, company? })` with a synchronous `convert` / `rate`. Rates come from a `res.currency.rate`
+model the application defines (fields `currency`, `company` optional, `date`, `rate`); one `DISTINCT ON` query per
+prepare takes the latest rate on or before the date, company rows before shared rows. The company currency's rate is 1
+when no row exists. Results are `Conversion { money, from, to, rate, rateDate }`. `MissingRateError` names the currency,
+date and company. `sql.fx` (SQL-side conversion) is not implemented yet.

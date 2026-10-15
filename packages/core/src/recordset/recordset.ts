@@ -777,6 +777,43 @@ function writeHost(loader: Loader): WriteHost {
   };
 }
 
+/** @internal The currency value object of a `res.currency` id, loaded through the cache. */
+export async function currencyById(internals: ScopeInternals, id: number): Promise<Currency> {
+  const cached = internals.cache.currencies.get(id);
+  if (cached !== undefined) return cached;
+  const loader: Loader = { env: internals.env, internals, registry: internals.registry };
+  const currency = internals.registry.get('res.currency').model;
+  await fetchMissing(loader, currency, [id], new Set(defaultKeys(currency)));
+  const v = valuesOf(internals.cache, currency.name, id);
+  const method =
+    typeof v?.get('roundingMethod') === 'string'
+      ? (String(v.get('roundingMethod')).replaceAll('_', '-') as RoundingMethod)
+      : undefined;
+  const places = v?.get('decimalPlaces');
+  const built = defineCurrency({
+    code: String(v?.get('name')),
+    rounding: v?.get('rounding') as DecimalJs,
+    ...(method === undefined ? {} : { roundingMethod: method }),
+    ...(typeof places === 'number' ? { decimalPlaces: places } : {}),
+    id,
+  });
+  internals.cache.currencies.set(id, built);
+  return built;
+}
+
+/** @internal The currency id of a company (`res.company.currency`). */
+export async function companyCurrencyId(
+  internals: ScopeInternals,
+  company: number,
+): Promise<number> {
+  const loader: Loader = { env: internals.env, internals, registry: internals.registry };
+  const model = internals.registry.get('res.company').model;
+  await fetchMissing(loader, model, [company], new Set(['currency']));
+  const id = valuesOf(internals.cache, model.name, company)?.get('currency');
+  if (typeof id !== 'number') throw new MissingRecordError(model.name, [company]);
+  return id;
+}
+
 /** @internal Flushes the unit of work (every model, or one): pending computes first, then the dirty records. */
 export async function flushAll(internals: ScopeInternals, model?: string): Promise<void> {
   const loader: Loader = { env: internals.env, internals, registry: internals.registry };

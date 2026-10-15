@@ -196,6 +196,8 @@ export type OnDelete = 'restrict' | 'cascade' | 'set null';
 /** Options of `f.many2one`. */
 export interface Many2oneOptions<T extends string> extends CommonOptions<Id<T>> {
   readonly ondelete?: OnDelete;
+  /** The target must be shared or in the same company as the record (RFC 0003 §7.4). The model must be companyScoped. */
+  readonly checkCompany?: boolean;
 }
 /** Options of x2many fields (never stored as a column). */
 export interface X2ManyOptions<T extends string>
@@ -266,6 +268,7 @@ export interface Many2oneField<T extends string, Fl extends FieldFlags>
   extends FieldBase<'many2one', { readonly id: Id<T> }, Id<T>, Fl> {
   readonly target: T;
   readonly ondelete: OnDelete;
+  readonly checkCompany: boolean;
 }
 /** `f.one2many` descriptor. */
 export interface One2manyField<T extends string, Fl extends FieldFlags>
@@ -913,6 +916,7 @@ export const f = {
       ...normalize(opts),
       target,
       ondelete,
+      checkCompany: opts.checkCompany ?? false,
     }) as Many2oneField<T, FlagsOf<O>>;
   },
 

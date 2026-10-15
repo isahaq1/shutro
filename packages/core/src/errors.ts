@@ -39,7 +39,9 @@ export type ShutroErrorCode =
   | 'CONSTRAINT'
   | 'CONSTRAINT_VIOLATION'
   | 'INVALID_TRANSITION'
-  | 'TRANSITION_GUARD';
+  | 'TRANSITION_GUARD'
+  | 'CROSS_COMPANY'
+  | 'MISSING_RATE';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -479,5 +481,33 @@ export class TransitionGuardError extends ShutroError {
     this.model = model;
     this.transition = transition;
     this.records = Object.freeze([...records]);
+  }
+}
+
+/** A record references a record of another company through a `checkCompany` many2one (RFC 0003 §7.4). */
+export class CrossCompanyError extends ShutroError {
+  readonly model: string;
+  readonly records: readonly {
+    readonly id: number;
+    readonly field: string;
+    readonly company: number | null;
+    readonly targetCompany: number;
+  }[];
+  constructor(model: string, records: CrossCompanyError['records']) {
+    const first = records[0];
+    super(
+      'CROSS_COMPANY',
+      `${model}: ${records.length} record(s) reference records of another company (e.g. #${first?.id ?? '?'}.${first?.field ?? '?'} belongs to company ${first?.targetCompany ?? '?'}, the record to ${first?.company ?? 'none'}).`,
+      'Reference a record of the same company or a shared one (no company), or switch the environment company with env.withCompany().',
+    );
+    this.model = model;
+    this.records = Object.freeze(records.map((r) => Object.freeze({ ...r })));
+  }
+}
+
+/** No exchange rate on or before the date (RFC 0006 §7.6), or the rate model is unusable. */
+export class MissingRateError extends ShutroError {
+  constructor(problem: string, hint: string) {
+    super('MISSING_RATE', problem, hint);
   }
 }
