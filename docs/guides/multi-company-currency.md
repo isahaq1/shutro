@@ -53,3 +53,18 @@ for (const line of lines) rates.convert(line.amountCurrency, companyCurrency);  
 - `{ round: false }` keeps the full precision (unit prices, rates).
 
 SQL-side conversion (`sql.fx`) for reports is not implemented yet.
+
+## Company-dependent fields
+
+One value per company (Odoo `company_dependent`): a product's cost, a partner's receivable account.
+
+```ts
+cost: f.decimal({ scale: 2, companyDependent: true, default: '0' }),
+incomeAccount: f.many2one('account.account', { companyDependent: true }),
+```
+
+- The column is a JSONB map `{ "<companyId>": value }`. Reads, writes, filters and sorts use the current company's
+  value; companies without one read the `default`. Write another company's value through `env.withCompany(c)`.
+- Not required, computed, translated, encrypted or numbered. Kinds: char, text, html, integer, float, decimal,
+  boolean, date, selection, many2one. A company-dependent many2one has no database foreign key; the ORM checks the
+  written ids. Grouping by one in `aggregate()` is not supported.

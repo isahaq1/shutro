@@ -105,6 +105,10 @@ export interface FieldBase<K extends FieldKind, R, W, Fl extends FieldFlags> {
   readonly translate: boolean;
   /** Stored encrypted with the application keys (RFC 0014 §7.6); char / text only. */
   readonly encrypted: boolean;
+  /** One value per company (a `jsonb` map by company id); reads and writes see the current company's value. */
+  readonly companyDependent: boolean;
+  /** The column type of one value (`pgType` is `jsonb` for company-dependent fields). */
+  readonly valueType: string;
   /** Phantom. Never present at runtime. */
   readonly '~types'?: FieldTypes<R, W, Fl>;
 }
@@ -130,6 +134,11 @@ export interface CommonOptions<V> {
   /** Inline batch function, or the key of a model method shared by several fields. */
   readonly compute?: ComputeFn | string;
   readonly inverse?: InverseFn;
+  /**
+   * One value per company (Odoo `company_dependent`): reads, writes, filters and sorts use the current company's
+   * value, falling back to `default`. Not required, stored, computed, translated or encrypted.
+   */
+  readonly companyDependent?: boolean;
 }
 
 /** Options of text-like fields. */
@@ -466,6 +475,7 @@ function assertDecimalDefault(value: unknown, kind: string): void {
 }
 
 interface Normalized {
+  readonly companyDependent: boolean;
   readonly label: string | undefined;
   readonly help: string | undefined;
   readonly required: boolean;
@@ -558,6 +568,18 @@ function normalize(options: LooseOptions, defaults: Defaults = {}): Normalized {
     );
   }
   const computed = compute !== undefined;
+  if (
+    options.companyDependent === true &&
+    (options.required === true ||
+      computed ||
+      options.translate === true ||
+      options.encrypted === true ||
+      sequence !== undefined)
+  )
+    throw new InvalidFieldError(
+      'A company-dependent field cannot be required, computed, translated, encrypted or numbered.',
+      'Give it a default instead of required; companies without a value read the default.',
+    );
   return {
     label: options.label,
     help: options.help,
@@ -582,13 +604,46 @@ function normalize(options: LooseOptions, defaults: Defaults = {}): Normalized {
     sequence,
     translate: options.translate ?? false,
     encrypted: options.encrypted ?? false,
+    companyDependent: options.companyDependent ?? false,
   };
 }
 
-function make<F extends object>(descriptor: F): F {
+const COMPANY_DEPENDENT_KINDS = new Set([
+  'char',
+  'text',
+  'html',
+  'integer',
+  'float',
+  'decimal',
+  'boolean',
+  'date',
+  'selection',
+  'many2one',
+]);
+
+function make<F extends object>(input: F): F & { readonly valueType: string } {
+  const d = input as F & {
+    kind?: string;
+    pgType?: string;
+    companyDependent?: boolean;
+    valueType?: string;
+  };
+  let descriptor: F = input;
+  if (d.valueType === undefined && d.pgType !== undefined) {
+    if (d.companyDependent === true && !COMPANY_DEPENDENT_KINDS.has(d.kind ?? ''))
+      throw new InvalidFieldError(
+        `A ${d.kind} field cannot be company-dependent.`,
+        'Company-dependent fields are char, text, html, integer, float, decimal, boolean, date, selection or many2one.',
+      );
+    descriptor = {
+      ...input,
+      valueType: d.kind === 'many2one' ? 'bigint' : d.pgType,
+      pgType: d.companyDependent === true ? 'jsonb' : d.pgType,
+    };
+  }
   const frozen = Object.freeze(descriptor);
   created.add(frozen);
-  return frozen;
+  return frozen as F & { readonly valueType: string };
 }
 
 function textLike<K extends 'char' | 'text' | 'html'>(

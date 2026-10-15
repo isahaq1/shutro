@@ -77,9 +77,9 @@ function groupOf(host: AggregateHost, model: AnyModel, name: string): Group {
       `'${name}' cannot group ${model.name}.`,
       'Group by a stored char, selection, state, boolean, integer, date, datetime or many2one field; dates take a granularity, e.g. dateOrder:month.',
     );
-  if (field.translate)
+  if (field.translate || field.companyDependent)
     invalid(
-      `'${key}' is translated; grouping by it is not supported.`,
+      `'${key}' is translated or company-dependent; grouping by it is not supported.`,
       'Group by an untranslated field.',
     );
   const column = sql.id(model.columns[key] ?? '');

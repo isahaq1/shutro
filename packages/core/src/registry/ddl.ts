@@ -41,6 +41,7 @@ const NUMERIC_KINDS = new Set(['integer', 'float', 'decimal']);
  */
 export function columnDefault(key: string, field: Field): string | null {
   if (key === 'createdAt' || key === 'updatedAt') return 'now()';
+  if (field.companyDependent) return "'{}'"; // per-company values; the field default applies when reading
   const value: unknown = field.default;
   if (value === undefined || value === null || typeof value === 'function') return null;
   if (field.translate || field.encrypted || field.sequence !== undefined || field.computed)
@@ -108,7 +109,11 @@ export function createTableStatements(registry: Registry): readonly CompiledSql[
         continue;
       }
       columns.push(columnDdl(model, key, field, column));
-      if (field.kind === 'many2one' && (field as { foreignKey?: boolean }).foreignKey !== false) {
+      if (
+        field.kind === 'many2one' &&
+        (field as { foreignKey?: boolean }).foreignKey !== false &&
+        !field.companyDependent
+      ) {
         const target = registry.get(targetOf(field) ?? '').model;
         const onDelete =
           ON_DELETE[(field as unknown as { ondelete: string }).ondelete] ?? 'RESTRICT';

@@ -51,6 +51,7 @@ import {
 } from './security.js';
 import { assignNumbers } from './sequences.js';
 import { availableTransitions, runTransition } from './transitions.js';
+import { companyValue } from './values.js';
 import {
   createRecords,
   flushDirty,
@@ -777,7 +778,9 @@ export class RecordSetImpl {
         : `Load it first: await records.load(['${key}'])${field.kind === 'many2one' ? ` or load({ ${key}: true }) for the related record` : ''}.`;
       throw new FieldNotLoadedError(this.modelName, key, hint);
     }
-    const raw = values.get(key);
+    const raw = field.companyDependent
+      ? companyValue(field, values.get(key), this.env.companyId)
+      : values.get(key);
     if (field.translate) {
       return resolveTranslation(
         raw as Translations | null,
@@ -944,7 +947,11 @@ function followsRelations(
 }
 
 function translationScope(internals: ScopeInternals): TranslationScope {
-  return { lang: internals.env.lang, source: internals.sourceLang };
+  return {
+    lang: internals.env.lang,
+    source: internals.sourceLang,
+    company: internals.env.companyId,
+  };
 }
 
 /** @internal The currency value object of a `res.currency` id, loaded through the cache. */
