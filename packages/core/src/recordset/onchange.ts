@@ -123,7 +123,16 @@ async function materialize(
   } else {
     for (const key of stored) {
       const field = model.fields[key] as Field;
-      values.set(key, field.computed ? null : (defaultOf(field, internals.env) ?? null));
+      // Defaults are normalized like given values ('1' → Decimal), so computes on drafts see real types.
+      if (field.computed) values.set(key, null);
+      else
+        setDraftValue(
+          model,
+          values,
+          key,
+          defaultOf(field, internals.env) ?? null,
+          translationOf(host),
+        );
     }
     for (const key of Object.keys(model.fields)) {
       if (isX2Many(model.fields[key] as Field)) values.set(key, []);
