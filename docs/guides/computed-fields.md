@@ -118,3 +118,21 @@ country: f.many2one('res.country', { store: true, ...related('partner.country') 
 
 The field's kind (and many2one target) must match the field the path ends at, and every step must be a
 many2one: both are checked when the registry is built. An empty step gives `null`.
+
+## Searching non-stored computed fields
+
+Give the field a `search(operator, value)` that returns a domain on stored fields (annotate its parameters):
+
+```ts
+expensive: f.boolean({
+  depends: ['price'],
+  compute(records) { for (const p of records) p.expensive = p.price.gt(100); },
+  search: (op: string, value: unknown) =>
+    (op === 'eq' && value === true) || (op === 'ne' && value === false) ? { price: { gt: '100' } } : { price: { lte: '100' } },
+}),
+
+await env.model('product.product').search({ where: { expensive: true } });
+```
+
+The returned domain is compiled like any other (rules, paths, operators apply). Non-stored related fields are
+searchable without one: they filter through their path.

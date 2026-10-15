@@ -176,6 +176,7 @@ export {
   type QuantityField,
   type QuantityOptions,
   type ScalarField,
+  type SearchFn,
   type SelectionField,
   type SelectionOptions,
   type StateField,

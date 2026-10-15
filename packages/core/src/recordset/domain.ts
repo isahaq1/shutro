@@ -243,6 +243,17 @@ export function compileDomain(
       }
       continue;
     }
+    // A non-stored computed field with a search function filters through the domain it returns.
+    const searchFn = model.columns[key] === undefined ? model.fields[key]?.search : undefined;
+    if (searchFn !== undefined) {
+      const terms = isOperators(value) ? Object.entries(value) : [['eq', value] as const];
+      for (const [op, operand] of terms) {
+        if (operand === undefined) continue;
+        const inner = compileDomain(model, searchFn(op, operand), translation, resolve, scope);
+        conditions.push(inner.length === 0 ? sql`TRUE` : sql`(${sql.join(inner, sql` AND `)})`);
+      }
+      continue;
+    }
     // A non-stored related field (delegation included) filters through its path.
     const mirrored =
       model.columns[key] === undefined ? relatedPath(model.fields[key]?.compute) : undefined;

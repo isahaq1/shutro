@@ -4,7 +4,7 @@
 ERP workloads: type-safe, secure by default, modular, multi-company, multi-currency, audit-ready and fast at scale.
 It is the data layer of the Kosh ERP framework.
 
-> **Status: alpha (0.x).** The engine is tested end to end against real PostgreSQL (580+ tests, an ERP demo with
+> **Status: alpha (0.x).** The engine is tested end to end against real PostgreSQL (600+ tests, an ERP demo with
 > partner, product, sale and invoice modules), but the API may still change between minor versions. Known gaps are
 > tracked in [`docs/feedback.md`](docs/feedback.md).
 
@@ -30,6 +30,9 @@ Requirements: Node.js ≥ 24, PostgreSQL ≥ 14.
   verified identities, administrator roles that need no grants, feature permissions, special per-user grants,
   back-date permissions for transactions, and audited elevated methods.
 - **Reports**: `aggregate()` (grouped totals with rules applied, per-currency `Money`), `records.sum()`.
+- **Odoo-ORM parity, typed and checked at startup**: module data with external ids (`record`, `ref`, `env.ref`),
+  related fields, delegation (`delegates`), hierarchies (`childOf` / `parentOf`), company-dependent fields, search
+  on computed fields, and roles / access / rules editable at runtime.
 - **Typed definitions**: `shutro generate` writes per-module bindings, so computes, checks, onchange handlers and
   methods are typed with no casts.
 - **Migrations**: schema diff against the live catalog, versioned migration files, destructive-change guard.
