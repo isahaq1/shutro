@@ -228,6 +228,7 @@ export {
   partitionStatements,
   rangePartitions,
 } from './model/partition.js';
+export { related, relatedPath } from './model/related.js';
 export {
   type DefinitionHelpers,
   definitions,

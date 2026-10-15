@@ -171,12 +171,13 @@ function splitRow(
       commands.set(key, value as Row);
       continue;
     }
-    if (model.columns[key] === undefined)
+    // A non-stored computed field is writable through its inverse (related fields with writable: true).
+    if (model.columns[key] === undefined && !(field.computed && field.inverse !== undefined))
       fail(
         model,
         [key],
         `field '${key}' is not stored.`,
-        'Non-stored computed fields cannot be written.',
+        'Non-stored computed fields cannot be written unless they have an inverse.',
       );
     stored.set(key, normalize(model, key, field, value, siblings, translationOf(host.internals)));
   }
@@ -436,6 +437,12 @@ export async function writeRecords(
     const cached = host.values(model.name, id, true) as Map<string, unknown>;
     for (const [key, value] of stored) {
       const field = model.fields[key] as Field;
+      if (model.columns[key] === undefined) {
+        // Non-stored with an inverse: the value lives in the cache for the inverse to read; nothing to flush.
+        cached.set(key, value);
+        inverses.add(key);
+        continue;
+      }
       if (field.kind === 'many2one') {
         invalidateInverseLists(host, model, key, cached.get(key), value);
         parentsByKey.set(key, [...(parentsByKey.get(key) ?? []), cached.get(key), value]);
@@ -462,8 +469,11 @@ export async function writeRecords(
   for (const [key, changed] of changedByKey) internals.trigger(model.name, key, changed);
   for (const [key, parents] of parentsByKey) triggerParents(internals, model, key, parents);
   for (const key of inverses) {
-    const inverse = (model.fields[key] as Field).inverse as (records: unknown) => unknown;
-    await inverse(host.recordset(model, ids));
+    const inverse = (model.fields[key] as Field).inverse as unknown as (
+      records: unknown,
+      key: string,
+    ) => unknown;
+    await inverse(host.recordset(model, ids), key);
   }
 }
 
