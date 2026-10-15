@@ -20,6 +20,7 @@ import {
   NoRegistryError,
   TransactionScopeError,
 } from '../errors.js';
+import type { Id } from '../model/id.js';
 import { createFx, type Fx } from '../money/fx.js';
 import { trackSuperuser } from '../recordset/audit.js';
 import { invalidateCached } from '../recordset/compute.js';
@@ -240,6 +241,17 @@ export class Env<S = unknown> {
   /** Allowed company ids (record-rule scope). */
   readonly companyIds: readonly number[];
   readonly lang: string;
+
+  /** {@link uid} as a `res.users` id, for many2one defaults: `default: (env) => env.userId`. */
+  get userId(): Id<'res.users'> {
+    return this.uid as Id<'res.users'>;
+  }
+
+  /** {@link companyId} as a `res.company` id. */
+  get companyRef(): Id<'res.company'> {
+    return this.companyId as Id<'res.company'>;
+  }
+
   /** The language translatable fields fall back to when `lang` has no text (RFC 0011). */
   readonly sourceLang: string;
   readonly tz: string;

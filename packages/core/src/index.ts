@@ -211,6 +211,12 @@ export {
   rangePartitions,
 } from './model/partition.js';
 export {
+  type DefinitionHelpers,
+  definitions,
+  type LoadedFrom,
+  type PathLoaded,
+} from './model/typed.js';
+export {
   type Currency,
   type CurrencyInput,
   defineCurrency,

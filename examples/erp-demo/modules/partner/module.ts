@@ -1,9 +1,8 @@
 /**
  * partner: customers and suppliers, shared across companies unless a company is set.
  */
-import { defineModel, defineModule, f } from '@shutro/core';
-import type { Records } from '../../app/types.ts';
 import { base } from '../base/module.ts';
+import { check, defineModel, defineModule, f } from './.shutro/bindings.ts';
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -27,12 +26,9 @@ export const ResPartner = defineModel('res.partner', {
   },
   constraints: {
     emailFormat: {
-      depends: ['email'],
-      check(records: unknown): unknown {
-        return (records as Records<'res.partner'>).filter(
-          (p) => p.email !== null && !EMAIL.test(p.email),
-        );
-      },
+      ...check('res.partner', ['email'], (partners) =>
+        partners.filter((p) => p.email !== null && !EMAIL.test(p.email)),
+      ),
       message: 'An email address must look like name@example.com.',
     },
   },

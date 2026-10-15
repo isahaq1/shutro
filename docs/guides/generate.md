@@ -74,6 +74,45 @@ export async function ship(env: Env, orders: Records<'sale.order'>): Promise<voi
 
 Application code imports `createShutro`, `Env` and `Records` from `app/.shutro/index.js` and sees every module.
 
+## Typed definition callbacks
+
+The bindings also export `compute`, `check`, `onchange`, `records` and `method`, typed against the module's view, so
+definitions need no casts:
+
+```ts
+import { check, compute, defineModel, f, method, onchange, records } from './.shutro/bindings.ts';
+
+const amounts = compute('sale.order', ['amountUntaxed', 'amountTax', 'amountTotal'], ['lines.subtotal', 'lines.taxAmount'], (orders) => {
+  for (const o of orders) {
+    o.amountUntaxed = o.lines.sum('subtotal', o.currency); // lines loaded with subtotal: typed from depends
+    o.amountTax = o.lines.sum('taxAmount', o.currency);
+    o.amountTotal = o.amountUntaxed.plus(o.amountTax);
+  }
+});
+
+export const SaleOrder = defineModel('sale.order', {
+  fields: {
+    amountUntaxed: f.monetary({ currency: 'currency', store: true, ...amounts }),
+    // ...
+    state: f.state({ /* ... */ transitions: { confirm: { from: ['draft'], to: 'sale',
+      guard: records('sale.order', async (orders) => (await orders.load({ lines: true })).filter((o) => o.lines.length === 0)) } } }),
+  },
+  onchange: { partner: onchange('sale.order', async (d) => { const p = await d.record('partner'); if (p?.currency) d.set('currency', p.currency.id); }) },
+  constraints: { positive: { ...check('sale.order', ['amountTotal'], (orders) => orders.filter((o) => o.amountTotal?.isNegative() === true)), message: 'Totals cannot be negative.' } },
+  methods: {
+    createInvoices: method('sale.order', async function (): Promise<number> { return (await this.load()).length; }),
+  },
+});
+```
+
+- `compute(model, assigns, depends, fn)`: records are loaded along `depends` (`'lines.subtotal'` types `o.lines` with
+  `subtotal`); only `assigns` are writable, other computed fields read with their read type.
+- Callback records have fields and the recordset API, not the model's methods (naming them would make the
+  definition depend on itself, TS7022). `method()` bodies have them; annotate a method's return type.
+- Methods, transitions and transitions added by extensions are typed in the view (`SaleOrderMethods`).
+- The definitions hash covers only what the types depend on, so labels, indexes or security metadata do not churn
+  the generated files.
+
 ## In the repository
 
 Commit `shutro.config.ts`; git-ignore `.shutro/` in applications and regenerate in `postinstall` and CI
@@ -83,10 +122,8 @@ types without running the generator on someone else's sources.
 ## Running it
 
 The generator imports the module files at runtime (definitions must be side-effect free). Node 24+ runs `.ts` files
-natively, but it does not rewrite the `./module.js` specifiers that `moduleResolution: nodenext` requires between
-TypeScript sources, so run `shutro generate` through a loader (`node --import tsx node_modules/.bin/shutro generate`),
-against compiled output, or with `rewriteRelativeImportExtensions` and `.ts` specifiers. Vitest and tsx handle it
-transparently.
+natively; the CLI registers a resolve hook so the `./module.js` specifiers of `moduleResolution: nodenext` find the
+`.ts` sources, and `.ts` specifiers work too. No loader is needed.
 
 ## Not yet
 

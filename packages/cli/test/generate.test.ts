@@ -84,7 +84,7 @@ describe('generate', () => {
     );
     expect(saleStock).toContain("readonly 'stock.warehouse': StockWarehouse;");
     expect(saleStock).toContain(
-      "F.Methods<typeof import('../../sale/module.js').sale, 'sale.order'> & F.Methods<typeof import('../module.js').saleStock, 'sale.order'>",
+      "F.Methods<typeof import('../../sale/module.js').sale, 'sale.order'>, F.Methods<typeof import('../module.js').saleStock, 'sale.order'>",
     );
     expect(saleStock).not.toContain('margin');
 

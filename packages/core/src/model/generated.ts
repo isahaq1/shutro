@@ -100,10 +100,14 @@ type Contributions<Mod> = Mod extends {
  * The `methods` that module `Mod` (its models and extensions) declares on model `N`. Generated views intersect one
  * of these per contributing module, so method types come from the sources without a compiler API.
  */
-export type Methods<Mod, N extends string> = UnionToIntersection<
-  Extract<Contributions<Mod>, { readonly name: N }> extends infer C
-    ? C extends { readonly methods: infer M }
-      ? M
+export type Methods<Mod, N extends string> = OrEmpty<
+  UnionToIntersection<
+    Extract<Contributions<Mod>, { readonly name: N }> extends infer C
+      ? C extends { readonly methods: infer M }
+        ? M
+        : never
       : never
-    : never
+  >
 >;
+/** `{}` instead of `unknown` when a module declares no method, so generated method interfaces can extend it. */
+type OrEmpty<X> = unknown extends X ? Record<never, never> : X;

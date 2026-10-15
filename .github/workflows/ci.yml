@@ -28,8 +28,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm exec biome ci .
       - run: node scripts/check-forbidden.ts
+      - run: pnpm build # the CLI end-to-end test runs dist/bin.js under plain Node
       - run: pnpm test
-      - run: pnpm build
 
   bench:
     name: benchmarks (query budgets)

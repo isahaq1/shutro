@@ -205,13 +205,16 @@ export interface RecordSetApi<S, M extends ModelName<S>, L> {
   mapped<K extends ScalarKeys<S, M> & SOf<L>>(key: K): ReadValue<FieldsOf<S, M>[K]>[];
   /**
    * Total of a loaded numeric field, `NULL`s skipped: `Money` for monetary fields (one currency, else
-   * `CurrencyMismatchError`; an empty set needs `currency`), `Decimal` for decimals, `number` for integers and floats.
+   * `CurrencyMismatchError`; an empty set needs `currency`: a `Currency`, a record's `currency` or an id), `Decimal` for decimals, `number` for integers and floats.
    *
    * ```ts
    * order.untaxed = order.lines.sum('subtotal', order.currency);
    * ```
    */
-  sum<K extends SummableKeys<S, M> & SOf<L>>(key: K, currency?: Currency): SumOf<FieldsOf<S, M>[K]>;
+  sum<K extends SummableKeys<S, M> & SOf<L>>(
+    key: K,
+    currency?: Currency | IdOnly<'res.currency'> | number,
+  ): SumOf<FieldsOf<S, M>[K]>;
   /** Updates the records in the cache now; the database is updated at the next flush point (search, raw SQL, savepoint end, commit). */
   write(values: WriteValues<S, M>): Promise<void>;
   /** Deletes the records now (`ON DELETE` rules apply). */
@@ -439,21 +442,35 @@ export type TranslatedKeys<S, M extends ModelName<S>> = {
 export type ComputedKeys<S, M extends ModelName<S>> = {
   [K in Keys<S, M>]: FlagsOfField<FieldsOf<S, M>[K]>['computed'] extends true ? K : never;
 }[Keys<S, M>];
-/** A record inside a compute: computed keys are assignable (RFC 0008 §7.7). */
-export type ComputeRec<S, M extends ModelName<S>, L> = Omit<Rec<S, M, L>, ComputedKeys<S, M>> & {
-  -readonly [K in ComputedKeys<S, M>]:
-    | FieldValue<S, M, K, FieldsOf<S, M>[K], L>
-    | WriteType<FieldsOf<S, M>[K]>;
-};
-/** A recordset inside a compute: iteration yields {@link ComputeRec}. */
-export type ComputeSet<S, M extends ModelName<S>, L> = Omit<
-  RecordSet<S, M, L>,
-  typeof Symbol.iterator | 'first' | 'ensureOne'
-> & {
-  [Symbol.iterator](): Iterator<ComputeRec<S, M, L>>;
-  first(): ComputeRec<S, M, L>;
-  ensureOne(): ComputeRec<S, M, L>;
-};
+/**
+ * A record inside a compute: the `A` computed keys are assignable (RFC 0008 §7.7), other computed keys read with their
+ * read type. Built without `Omit` over the recordset (whose keys include the model's methods), so typing a compute
+ * against a generated view never needs the methods' types (feedback #1: no TS7022 cycle through the module).
+ */
+export type ComputeRec<
+  S,
+  M extends ModelName<S>,
+  L,
+  A extends ComputedKeys<S, M> = ComputedKeys<S, M>,
+  Ms = MethodsOf<S, M>,
+> = RecordSetApi<S, M, L> &
+  Ms &
+  Omit<Access<S, M, L>, A> & {
+    -readonly [K in A]: FieldValue<S, M, K, FieldsOf<S, M>[K], L> | WriteType<FieldsOf<S, M>[K]>;
+  };
+/** A recordset inside a compute: iteration yields {@link ComputeRec} (these members come first, so they win). */
+export type ComputeSet<
+  S,
+  M extends ModelName<S>,
+  L,
+  A extends ComputedKeys<S, M> = ComputedKeys<S, M>,
+  Ms = MethodsOf<S, M>,
+> = Omit<RecordSetApi<S, M, L>, typeof Symbol.iterator | 'first' | 'ensureOne'> &
+  Ms & {
+    [Symbol.iterator](): Iterator<ComputeRec<S, M, L, A, Ms>>;
+    first(): ComputeRec<S, M, L, A, Ms>;
+    ensureOne(): ComputeRec<S, M, L, A, Ms>;
+  };
 
 // ------------------------------------------------------------------------------------------------- onchange
 

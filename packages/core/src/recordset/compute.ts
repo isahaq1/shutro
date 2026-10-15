@@ -26,6 +26,8 @@ export interface ComputeSpec {
 export interface ComputeHost {
   readonly internals: ScopeInternals;
   load(model: AnyModel, ids: readonly number[], spec: ComputeSpec): Promise<void>;
+  /** Loads the `Currency` / `Uom` objects the monetary / quantity `fields` of the records refer to. */
+  valueObjects(model: AnyModel, ids: readonly number[], fields: ReadonlySet<string>): Promise<void>;
   values(model: string, id: number, create?: boolean): Map<string, unknown> | undefined;
   /** A recordset of `ids` (one prefetch group) to pass to compute functions. */
   recordset(model: AnyModel, ids: readonly number[]): unknown;
@@ -341,7 +343,17 @@ export async function computeFields(
   const { internals } = host;
   for (const group of groupByCompute(fields)) {
     const all = sharing(internals, group[0] as ComputedField);
-    await host.load(model, ids, dependsSpec(internals, model, all));
+    // The assigned fields' currency / unit siblings and their objects too: a compute can then total into the
+    // record's currency (`lines.sum('subtotal', o.currency)`) even when there is nothing to sum.
+    const spec = dependsSpec(internals, model, all);
+    const siblings = all.flatMap((f) => {
+      const field = model.fields[f.key] as
+        | { currencyField?: string; uomField?: string }
+        | undefined;
+      return [field?.currencyField, field?.uomField].filter((k): k is string => k !== undefined);
+    });
+    await host.load(model, ids, { ...spec, fields: new Set([...spec.fields, ...siblings]) });
+    await host.valueObjects(model, ids, new Set(all.map((f) => f.key)));
     const names = all.map(name);
     for (const n of names) {
       internals.compute.computing.add(n);

@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ConfigError } from './errors.js';
+import { allowJsSpecifiersForTs } from './resolve.js';
 
 /** The exported config. Paths are relative to the config file. */
 export interface ShutroConfig {
@@ -46,6 +47,7 @@ export async function loadConfig(file: string): Promise<{ config: ShutroConfig; 
       'Create shutro.config.ts with `export default defineConfig({ modules: [...] })`, or pass --config.',
     );
   }
+  allowJsSpecifiersForTs();
   const loaded = (await import(pathToFileURL(path).href)) as {
     default?: unknown;
     config?: unknown;
