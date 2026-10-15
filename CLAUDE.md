@@ -200,4 +200,4 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Benchmarks in CI (benchmarks/: query budgets as the gate, timings uploaded)
 
 ### Phase 6 — Proof
-- [ ] `examples/erp-demo`: partner, product, sale, invoice modules built on Shutro
+- [x] `examples/erp-demo`: partner, product, sale, invoice modules built on Shutro (pain points in docs/feedback.md)

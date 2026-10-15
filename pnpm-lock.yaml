@@ -72,6 +72,28 @@ importers:
         specifier: workspace:*
         version: link:../packages/testing
 
+  examples/erp-demo:
+    dependencies:
+      '@shutro/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@shutro/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@shutro/driver-pg':
+        specifier: workspace:*
+        version: link:../../packages/driver-pg
+      '@shutro/migrate':
+        specifier: workspace:*
+        version: link:../../packages/migrate
+      '@shutro/sql':
+        specifier: workspace:*
+        version: link:../../packages/sql
+    devDependencies:
+      '@shutro/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+
   packages/audit:
     dependencies:
       '@shutro/sql':
