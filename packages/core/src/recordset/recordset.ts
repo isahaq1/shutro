@@ -36,8 +36,8 @@ import {
 import { junctionTable } from './relations.js';
 import {
   assertAccess,
+  assertDomainFields,
   assertFields,
-  domainKeys,
   explainDenied,
   loadedValue,
   readableKeys,
@@ -963,7 +963,7 @@ export function modelRef(
       } = {},
     ): Promise<RecordSetImpl> {
       assertAccess(internals, model, 'read');
-      assertFields(internals, model, domainKeys(query.where), 'read');
+      assertDomainFields(internals, model, query.where);
       assertFields(
         internals,
         model,
@@ -981,7 +981,7 @@ export function modelRef(
       ]);
       const translation = translationScope(internals);
       const conditions = [
-        ...compileDomain(model, query.where, translation),
+        ...compileDomain(model, query.where, translation, (n) => internals.registry.get(n).model),
         ...scopingConditions(model, env),
         ...ruleConditions(internals, model, 'read'),
       ];

@@ -79,6 +79,41 @@ export function readableKeys(
   return [...keys].filter((k) => canField(internals, model, k, 'read'));
 }
 
+/**
+ * Checks that every field a domain mentions is readable, following relation paths and `any` / `none` into the
+ * related models: a filter on a hidden field would leak it through which records match (RFC 0014 §7.4).
+ */
+export function assertDomainFields(
+  internals: ScopeInternals,
+  model: AnyModel,
+  domain: unknown,
+): void {
+  if (Array.isArray(domain)) {
+    for (const d of domain) assertDomainFields(internals, model, d);
+    return;
+  }
+  if (typeof domain !== 'object' || domain === null) return;
+  for (const [key, value] of Object.entries(domain)) {
+    if (key === 'or' || key === 'and' || key === 'not') {
+      assertDomainFields(internals, model, value);
+      continue;
+    }
+    const [head = '', ...rest] = key.split('.');
+    assertFields(internals, model, [head], 'read');
+    const field = model.fields[head];
+    const target = (field as { target?: string } | undefined)?.target;
+    if (target === undefined) continue;
+    const targetModel = internals.registry.get(target).model;
+    assertAccess(internals, targetModel, 'read');
+    if (rest.length > 0) assertDomainFields(internals, targetModel, { [rest.join('.')]: value });
+    else if (typeof value === 'object' && value !== null) {
+      const v = value as { any?: unknown; none?: unknown };
+      if (v.any !== undefined) assertDomainFields(internals, targetModel, v.any);
+      if (v.none !== undefined) assertDomainFields(internals, targetModel, v.none);
+    }
+  }
+}
+
 /** The field keys a domain mentions (through `or` / `and` / `not`). */
 export function domainKeys(domain: unknown, out: Set<string> = new Set()): Set<string> {
   if (Array.isArray(domain)) {
@@ -108,6 +143,8 @@ export function ruleConditions(
     const conditions = compileDomain(
       model,
       resolvePlaceholders(rule.domain, placeholders) as Record<string, unknown>,
+      undefined,
+      (n) => internals.registry.get(n).model,
     );
     if (conditions.length > 0) out.push(sql`(${sql.join(conditions, sql` AND `)})`);
   }
@@ -118,6 +155,8 @@ export function ruleConditions(
       const conditions = compileDomain(
         model,
         resolvePlaceholders(rule.domain, placeholders) as Record<string, unknown>,
+        undefined,
+        (n) => internals.registry.get(n).model,
       );
       if (conditions.length === 0) return out; // an unconditional group rule grants everything the globals allow
       alternatives.push(sql`(${sql.join(conditions, sql` AND `)})`);

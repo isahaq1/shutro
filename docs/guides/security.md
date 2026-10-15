@@ -48,10 +48,27 @@ export const SaleOrder = defineModel('sale.order', {
   load (relations included); `browse(id).load()` on a record out of scope is an `AccessError` naming the ids
   (`MissingRecordError` when it does not exist); `write`, transitions and `unlink` check the ids first; `create`
   checks the inserted rows and fails the transaction if they are out of scope. Domains take `or` / `and` / `not`.
+  They follow relations: `{ 'order.user': { $env: 'uid' } }` ("lines of my orders"), `{ lines: { any: { … } } }`,
+  `{ tags: { none: { … } } }`. Paths compile to sub-selects, so the same rule works in RLS policies.
 - **Field groups**: an array restricts both reading and writing, `{ read, write }` separately. Restricted fields are
   left out of default projections and are an `AccessError` in load specs, filters, sorts, reads and writes.
 - **Superuser**: `env.asSuperuser({ reason }, fn)` skips all three for `fn` (audited, RFC 0013). The engine's own
   loads (computes, constraints, audit snapshots) carry no rules; what the user *sees* is governed at the boundary.
+
+## Verified identities
+
+`shutro.run` trusts its caller unless `createShutro` gets an `identity` loader:
+
+```ts
+const shutro = createShutro({
+  driver, registry,
+  identity: async (uid) => loadUser(uid), // { companies: number[], groups: string[] } or null when unknown/disabled
+});
+await shutro.run({ user: 7, company: 2 }, fn); // groups come from the loader
+```
+
+An unknown user is an `InvalidIdentityError`, a company outside `companies` a `CompanyNotAllowedError`, and requested
+`groups` must be a subset of the loaded ones.
 
 ## PostgreSQL row-level security
 

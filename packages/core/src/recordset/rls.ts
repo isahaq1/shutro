@@ -16,7 +16,7 @@ import {
 import { compile, sql } from '@shutro/sql';
 import type { AnyModel } from '../model/model.js';
 import type { Registry } from '../registry/registry.js';
-import { compileDomain } from './domain.js';
+import { compileDomain, type ModelResolver } from './domain.js';
 
 const MARK = '\u0000$env:';
 const SENTINEL = { uid: Number.NaN, companyId: Number.NaN, companyIds: [] as number[] };
@@ -46,7 +46,11 @@ function literal(value: unknown): string {
 }
 
 /** A rule domain as a boolean SQL expression over the table's columns and the session settings. */
-export function ruleCondition(model: AnyModel, domain: Readonly<Record<string, unknown>>): string {
+export function ruleCondition(
+  model: AnyModel,
+  domain: Readonly<Record<string, unknown>>,
+  resolve?: ModelResolver,
+): string {
   // Placeholders become markers that survive compilation as parameters, then turn into current_setting() reads.
   const marked = resolvePlaceholders(domain, {
     uid: `${MARK}uid` as unknown as number,
@@ -54,14 +58,14 @@ export function ruleCondition(model: AnyModel, domain: Readonly<Record<string, u
     companyIds: [`${MARK}companyIds`] as unknown as number[],
   });
   void SENTINEL;
-  const conditions = compileDomain(model, marked as Record<string, unknown>);
+  const conditions = compileDomain(model, marked as Record<string, unknown>, undefined, resolve);
   if (conditions.length === 0) return 'true';
   const { text, params } = compile(sql.join(conditions, sql` AND `));
   return text.replace(/\$(\d+)/g, (_, n: string) => literal(params[Number(n) - 1]));
 }
 
 /** The policies of one model, or `[]` when it has no rules. */
-export function modelPolicies(model: AnyModel): PolicyInput[] {
+export function modelPolicies(model: AnyModel, resolve?: ModelResolver): PolicyInput[] {
   const policies: PolicyInput[] = [];
   const perms: RulePerm[] = ['read', 'write', 'create', 'unlink'];
   for (const perm of perms) {
@@ -77,7 +81,7 @@ export function modelPolicies(model: AnyModel): PolicyInput[] {
           name,
           command,
           permissive: false,
-          condition: `${RLS_SU} OR (${ruleCondition(model, rule.domain)})`,
+          condition: `${RLS_SU} OR (${ruleCondition(model, rule.domain, resolve)})`,
         });
       } else {
         for (const g of rule.groups) groupCodes.add(g);
@@ -86,7 +90,7 @@ export function modelPolicies(model: AnyModel): PolicyInput[] {
           name,
           command,
           permissive: true,
-          condition: `${RLS_SU} OR (${rlsGroupCondition(rule.groups)} AND (${ruleCondition(model, rule.domain)}))`,
+          condition: `${RLS_SU} OR (${rlsGroupCondition(rule.groups)} AND (${ruleCondition(model, rule.domain, resolve)}))`,
         });
       }
     }
@@ -107,7 +111,7 @@ export function modelPolicies(model: AnyModel): PolicyInput[] {
 export function rlsStatements(registry: Registry): string[] {
   const out: string[] = [];
   for (const { model } of registry.models.values()) {
-    const policies = modelPolicies(model);
+    const policies = modelPolicies(model, (n) => registry.get(n).model);
     if (policies.length > 0) out.push(...policyStatements(model.table, policies));
   }
   return out;
