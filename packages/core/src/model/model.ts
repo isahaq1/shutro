@@ -433,7 +433,12 @@ export interface FieldDescription {
   readonly copy: boolean;
   readonly tracking: boolean;
   readonly translate: boolean;
-  readonly sequence: { readonly code: string; readonly gapless: boolean } | null;
+  readonly sequence: {
+    readonly code: string;
+    readonly gapless: boolean | undefined;
+    readonly on: 'create' | 'manual';
+    readonly dateField: string | undefined;
+  } | null;
   readonly deprecated: string | null;
   readonly groups: readonly string[];
   readonly [extra: string]: unknown;

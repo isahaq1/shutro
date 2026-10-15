@@ -43,6 +43,15 @@ export type ComputeFn = (records: never) => void | Promise<void>;
 /** Makes a computed field writable: receives the records whose computed value was written. */
 export type InverseFn = (records: never) => void | Promise<void>;
 
+/** The normalized `sequence` option of a field (RFC 0012 §7.1). */
+export interface SequenceFieldOptions {
+  readonly code: string;
+  /** As given on the field; the definition is authoritative. */
+  readonly gapless: boolean | undefined;
+  readonly on: 'create' | 'manual';
+  readonly dateField: string | undefined;
+}
+
 /** Phantom flags that decide a field's faces (RFC 0001 §7.3). */
 export interface FieldFlags {
   readonly required: boolean;
@@ -89,7 +98,7 @@ export interface FieldBase<K extends FieldKind, R, W, Fl extends FieldFlags> {
   readonly column: string | undefined;
   readonly groups: readonly string[];
   readonly deprecated: string | undefined;
-  readonly sequence: { readonly code: string; readonly gapless: boolean } | undefined;
+  readonly sequence: SequenceFieldOptions | undefined;
   readonly translate: boolean;
   /** Phantom. Never present at runtime. */
   readonly '~types'?: FieldTypes<R, W, Fl>;
@@ -355,7 +364,17 @@ type OnDeleteRules<O> = O extends { required: true }
   : unknown;
 
 type SequenceOption = {
-  readonly sequence?: string | { readonly code: string; readonly gapless?: boolean };
+  readonly sequence?:
+    | string
+    | {
+        readonly code: string;
+        /** Must agree with the definition when given. */
+        readonly gapless?: boolean;
+        /** `create` (default) fills the number on creation; `manual` stores '/' until assignNumber() (RFC 0012 §7.4). */
+        readonly on?: 'create' | 'manual';
+        /** The field whose value picks the period (and the placeholders); defaults to the environment's today. */
+        readonly dateField?: string;
+      };
 };
 type CharOpts = CharOptions & SequenceOption;
 
@@ -446,7 +465,7 @@ interface Normalized {
   readonly column: string | undefined;
   readonly groups: readonly string[];
   readonly deprecated: string | undefined;
-  readonly sequence: { readonly code: string; readonly gapless: boolean } | undefined;
+  readonly sequence: SequenceFieldOptions | undefined;
   readonly translate: boolean;
 }
 
@@ -494,8 +513,25 @@ function normalize(options: LooseOptions, defaults: Defaults = {}): Normalized {
     options.sequence === undefined
       ? undefined
       : typeof options.sequence === 'string'
-        ? { code: options.sequence, gapless: false }
-        : { code: options.sequence.code, gapless: options.sequence.gapless ?? false };
+        ? {
+            code: options.sequence,
+            gapless: undefined,
+            on: 'create' as const,
+            dateField: undefined,
+          }
+        : {
+            code: options.sequence.code,
+            gapless: options.sequence.gapless,
+            on: options.sequence.on ?? ('create' as const),
+            dateField: options.sequence.dateField,
+          };
+  if (sequence !== undefined && sequence.on !== 'create' && sequence.on !== 'manual') {
+    throw new InvalidFieldError(
+      `sequence.on ${JSON.stringify(sequence.on)} is unknown.`,
+      "Use on: 'create' (default) or on: 'manual'.",
+    );
+  }
+  if (sequence?.dateField !== undefined) assertFieldKey(sequence.dateField, 'sequence.dateField');
   if (sequence !== undefined && sequence.code.trim() === '') {
     throw new InvalidFieldError(
       'A sequence needs a code.',

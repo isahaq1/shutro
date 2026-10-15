@@ -14,6 +14,13 @@ export {
   type Translations,
 } from '@shutro/i18n';
 export {
+  defineSequence,
+  InvalidSequenceError,
+  type SequenceDefinition,
+  type SequenceInput,
+  type SequenceReset,
+} from '@shutro/sequence';
+export {
   buildComputeGraph,
   type ComputedField,
   type ComputeGraph,
@@ -76,11 +83,12 @@ export {
   TransitionGuardError,
   UndeclaredDependencyError,
   UnknownModelError,
+  UnknownSequenceError,
   UomMismatchError,
   ValidationError,
 } from './errors.js';
 export type { CreateOf, FlagsOfField, ReadOf, WriteOf } from './model/faces.js';
-export type { TextWrite } from './model/field.js';
+export type { SequenceFieldOptions, TextWrite } from './model/field.js';
 export {
   type BinaryField,
   type BinaryOptions,
@@ -176,6 +184,7 @@ export { Money, type MoneyJson } from './money/money.js';
 export { defineUom, Quantity, type Uom, type UomInput } from './money/quantity.js';
 export type { RoundingMethod } from './money/rounding.js';
 export { type JunctionTable, junctionTable } from './recordset/relations.js';
+export { UNNUMBERED } from './recordset/sequences.js';
 export type {
   Access,
   ComputedKeys,
@@ -210,6 +219,7 @@ export type {
   ScalarKeys,
   SearchOrder,
   SearchQuery,
+  SequenceKeys,
   Target,
   ToLoaded,
   TranslatedKeys,

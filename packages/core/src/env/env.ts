@@ -137,6 +137,8 @@ interface Runtime {
   readonly als: AsyncLocalStorage<Scope>;
   readonly onHookError: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
   readonly registry: Registry | undefined;
+  /** The pool, for autonomous transactions (standard sequences, RFC 0012 §7.2). */
+  readonly driver: Driver;
   /** The language translations fall back to (RFC 0011). */
   readonly sourceLang: string;
 }
@@ -161,6 +163,7 @@ export interface ScopeInternals {
   forget(model: string, id: number): void;
   cachedValues(model: string): Iterable<Map<string, unknown>>;
   readonly sourceLang: string;
+  readonly driver: Driver;
   flush(model?: string): Promise<void>;
   /** Records that `(model, key)` changed for `ids` and invalidates cached dependents (RFC 0008 §7.2). */
   trigger(model: string, key: string, ids: readonly number[]): void;
@@ -254,7 +257,13 @@ export class Env<S = unknown> {
       this.#assertUsable();
       const registry = runtime.registry;
       if (registry === undefined) throw new NoRegistryError();
-      return scopeInternals(this as unknown as Env, scope, registry, (q) => this.#query(q));
+      return scopeInternals(
+        this as unknown as Env,
+        scope,
+        registry,
+        (q) => this.#query(q),
+        runtime.driver,
+      );
     });
     Object.freeze(this);
   }
@@ -478,6 +487,7 @@ function scopeInternals(
   scope: Scope,
   registry: Registry,
   query: <R extends Row>(q: DriverQuery) => Promise<readonly R[]>,
+  driver: Driver,
 ): ScopeInternals {
   const root = scope.root;
   const dirtyOf = (model: string, id: number): Set<string> | undefined =>
@@ -548,6 +558,7 @@ function scopeInternals(
     },
     cachedValues: (model) => root.cache.records.get(model)?.values() ?? [],
     sourceLang: env.sourceLang,
+    driver,
     flush: (model) => flushAll(internalsOf(env), model),
     trigger(model, key, ids) {
       if (ids.length === 0) return;
@@ -695,6 +706,7 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
     onHookError: options.onHookError ?? defaultHookError,
     registry: options.registry as Registry | undefined,
     sourceLang: assertLang(options.sourceLang ?? 'en_US'),
+    driver: options.driver,
   };
   const NOW = compile(sqlTag`SELECT now() AS now`);
 

@@ -41,7 +41,8 @@ export type ShutroErrorCode =
   | 'INVALID_TRANSITION'
   | 'TRANSITION_GUARD'
   | 'CROSS_COMPANY'
-  | 'MISSING_RATE';
+  | 'MISSING_RATE'
+  | 'UNKNOWN_SEQUENCE';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -509,5 +510,16 @@ export class CrossCompanyError extends ShutroError {
 export class MissingRateError extends ShutroError {
   constructor(problem: string, hint: string) {
     super('MISSING_RATE', problem, hint);
+  }
+}
+
+/** A field references a sequence code no module declares (RFC 0012 §7.1). */
+export class UnknownSequenceError extends ShutroError {
+  constructor(code: string, where: string) {
+    super(
+      'UNKNOWN_SEQUENCE',
+      `${where} uses the sequence '${code}', which no module declares.`,
+      `Add defineSequence({ code: '${code}', ... }) to the sequences of a module the field's module depends on.`,
+    );
   }
 }

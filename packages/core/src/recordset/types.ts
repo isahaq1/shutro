@@ -207,6 +207,11 @@ export interface RecordSetApi<S, M extends ModelName<S>, L> {
   unlink(): Promise<void>;
   /** Plain JSON rows (ids for relations, `Money` / `Quantity` as objects, dates as ISO strings). */
   read<const K extends readonly LoadedKeys<L>[]>(keys: K): PlainRow<S, M, K[number]>[];
+  /** Numbers these records from their manual sequence (RFC 0012 §7.4); records with a number are refused. */
+  assignNumber<K extends SequenceKeys<S, M>>(
+    key: K,
+    options?: { readonly date?: string },
+  ): Promise<void>;
   /** The full translation map of a translatable field (singleton, loaded), or `null` (RFC 0011). */
   translations<K extends TranslatedKeys<S, M>>(key: K): Translations | null;
   /** Transition names the current state allows (singleton with its state loaded; RFC 0010 §7.3). */
@@ -276,6 +281,11 @@ export interface ModelRef<S, M extends ModelName<S>> {
 }
 
 // ------------------------------------------------------------------------------------------------ computes
+
+/** Keys of sequence-numbered fields. */
+export type SequenceKeys<S, M extends ModelName<S>> = {
+  [K in Keys<S, M>]: FlagsOfField<FieldsOf<S, M>[K]>['sequence'] extends true ? K : never;
+}[Keys<S, M>];
 
 /** Keys of translatable text fields (their write type accepts a translation map). */
 export type TranslatedKeys<S, M extends ModelName<S>> = {

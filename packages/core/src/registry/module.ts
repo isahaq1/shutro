@@ -4,6 +4,8 @@
  * carries its models, extensions and dependencies, so a registry built from modules knows every model it contains
  * (until `shutro generate` emits the same view).
  */
+
+import type { SequenceDefinition } from '@shutro/sequence';
 import { DuplicateModelError, InvalidModuleError } from '../errors.js';
 import { type AnyModel, humanize, isModel } from '../model/model.js';
 import { type AnyExtension, isExtension } from './extension.js';
@@ -36,6 +38,8 @@ export interface ModuleBase {
   readonly extensions: readonly AnyExtension[];
   /** Data-migration hooks, sorted by version. */
   readonly migrations: readonly DataMigration[];
+  /** Document sequences this module declares (RFC 0012 §7.1). */
+  readonly sequences: readonly SequenceDefinition[];
 }
 
 /** A module as `defineModule` returns it; the type parameters carry the model types for the registry's schema view. */
@@ -69,6 +73,8 @@ export interface ModuleDefinition<
   readonly extensions?: Exts;
   /** Data-migration hooks (see {@link DataMigration}). */
   readonly migrations?: readonly DataMigration[];
+  /** Document sequences (`defineSequence`). */
+  readonly sequences?: readonly SequenceDefinition[];
 }
 
 const MODULE_NAME = /^[a-z][a-z0-9_]*$/;
@@ -172,6 +178,13 @@ export function defineModule<
         'Pass { version, up: async (ctx) => { ... } }.',
       );
   }
+  for (const seq of definition.sequences ?? []) {
+    if (typeof seq !== 'object' || seq === null || typeof seq.code !== 'string')
+      throw new InvalidModuleError(
+        `Module '${name}' has a malformed sequence.`,
+        'Pass defineSequence({ code, ... }) entries.',
+      );
+  }
   migrations.sort((a, b) => compareVersions(a.version, b.version));
   const module: Module<Ms, Deps, Exts> = Object.freeze({
     name,
@@ -181,6 +194,7 @@ export function defineModule<
     models: Object.freeze([...definition.models]) as unknown as Ms,
     extensions: Object.freeze([...extensions]) as unknown as Exts,
     migrations: Object.freeze(migrations),
+    sequences: Object.freeze([...(definition.sequences ?? [])]),
   });
   modules.add(module);
   return module;

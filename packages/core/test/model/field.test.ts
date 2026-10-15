@@ -236,13 +236,16 @@ describe('compute and related options', () => {
   });
 
   test('sequence implies readonly', () => {
+    // gapless stays undefined unless the field says so: the sequence definition is authoritative (RFC 0012 §7.1).
     expect(f.char({ required: true, sequence: 'sale.order' })).toMatchObject({
       readonly: true,
-      sequence: { code: 'sale.order', gapless: false },
+      sequence: { code: 'sale.order', gapless: undefined, on: 'create', dateField: undefined },
     });
     expect(f.char({ sequence: { code: 'account.move', gapless: true } }).sequence).toEqual({
       code: 'account.move',
       gapless: true,
+      on: 'create',
+      dateField: undefined,
     });
   });
 

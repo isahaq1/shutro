@@ -32,6 +32,7 @@ import {
   runOnchange,
 } from './onchange.js';
 import { junctionTable } from './relations.js';
+import { assignNumbers } from './sequences.js';
 import { availableTransitions, runTransition } from './transitions.js';
 import {
   createRecords,
@@ -594,6 +595,20 @@ export class RecordSetImpl {
       );
     const raw = values.get(key);
     return raw === null || raw === undefined ? null : (raw as Translations);
+  }
+
+  /** Numbers unnumbered records of a manual sequence field (RFC 0012 §7.4). */
+  async assignNumber(
+    key: string,
+    options: { readonly date?: string | undefined } = {},
+  ): Promise<void> {
+    await assignNumbers(
+      computeHost(this.#loader),
+      this.model,
+      await this.resolveIds(),
+      key,
+      options,
+    );
   }
 
   /** @internal Runs a transition of state field `key` on these records (RFC 0010 §7.2). */
