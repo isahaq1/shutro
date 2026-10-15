@@ -97,3 +97,29 @@ await env.model('product.category').search({ where: { id: { parentOf: fruitId } 
 - `childOf` / `parentOf` take an id or ids, on `id` of the tree model or on any many2one to it, and include the
   given records. They compile to prefix matches on the path; index it with `index: 'trigram'` (a plain btree on
   text serves prefix `LIKE` only under the C collation).
+
+## Delegation
+
+A model can expose another model's fields as its own (Odoo `_inherits`): product variants and their template.
+
+```ts
+export const ProductProduct = defineModel('product.product', {
+  delegates: ['template'],
+  fields: {
+    template: f.many2one('product.template', { required: true, ondelete: 'cascade' }),
+    barcode: f.char(),
+  },
+});
+
+await env.model('product.product').create([{ name: 'Shirt', listPrice: '25.00', barcode: 'S-RED' }]); // creates the template
+await env.model('product.product').create([{ template: shirtTemplate, barcode: 'S-BLUE' }]);         // a second variant
+await variant.write({ listPrice: '30.00' });                                                              // writes the template
+await env.model('product.product').search({ where: { name: 'Shirt', barcode: 'S-RED' } });               // filters through it
+```
+
+- Every stored field of the parent (after its extensions; not x2many or state fields, and not fields the child
+  declares itself) becomes a writable related field of the child; values live only in the parent.
+- A create without the delegate many2one creates the parent (one batch per delegate); with it, the given parent
+  values update that parent.
+- Filters on delegated fields (and on any non-stored related field) compile through the path. Sorting on them is
+  not supported yet. Generated views type the delegated fields; the inferred `buildRegistry` schema does not.

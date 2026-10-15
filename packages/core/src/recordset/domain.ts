@@ -11,6 +11,7 @@ import type { Env } from '../env/env.js';
 import { InvalidDomainError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
+import { relatedPath } from '../model/related.js';
 import { junctionTable } from './relations.js';
 
 /** Resolves a model by name (the registry), needed for relation paths. */
@@ -221,6 +222,24 @@ export function compileDomain(
             ),
           );
       }
+      continue;
+    }
+    // A non-stored related field (delegation included) filters through its path.
+    const mirrored =
+      model.columns[key] === undefined ? relatedPath(model.fields[key]?.compute) : undefined;
+    if (mirrored !== undefined) {
+      const dot = mirrored.indexOf('.');
+      conditions.push(
+        relation(
+          model,
+          mirrored.slice(0, dot),
+          { [mirrored.slice(dot + 1)]: value },
+          'any',
+          translation,
+          resolve,
+          scope,
+        ),
+      );
       continue;
     }
     const { column: col } = column(model, key, translation);
