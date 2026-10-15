@@ -59,6 +59,13 @@ export {
   type ShutroOptions,
 } from './env/env.js';
 export type { Identity, ResolvedIdentity } from './env/identity.js';
+export {
+  createInspector,
+  type InspectedQuery,
+  type Inspector,
+  type InspectorOptions,
+  type InspectorWarning,
+} from './env/inspector.js';
 export { assertTimeZone, calendarDateIn } from './env/time.js';
 export {
   AccessError,

@@ -36,12 +36,13 @@ describe('shutro', () => {
     expect(await runCli(['--help'], io())).toBe(0);
   });
 
-  test('unknown and unimplemented commands', async () => {
+  test('unknown commands and subcommands', async () => {
     const o = io();
     expect(await runCli(['bogus'], o)).toBe(2);
     expect(o.err.join('')).toContain("Unknown command 'bogus'");
-    expect(await runCli(['migrate'], o)).toBe(2);
-    expect(o.err.join('')).toContain('not implemented yet');
+    const m = { ...io(), env: { SHUTRO_DATABASE_URL: undefined } };
+    expect(await runCli(['migrate', 'status', '--config', configFile], m)).toBe(2);
+    expect(m.err.join('')).toContain('No database is configured');
   });
 
   test('a missing config is reported with a hint', async () => {

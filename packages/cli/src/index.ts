@@ -1,7 +1,6 @@
 /**
  * @packageDocumentation
- * `@shutro/cli`: `shutro generate` (per-module and application type views, RFC 0002 §7.7). `init`, `migrate` and
- * `inspect` arrive with the CLI roadmap item.
+ * `@shutro/cli`: `shutro init | generate | migrate | inspect`.
  */
 export { type CliIo, runCli } from './cli.js';
 export { defineConfig, loadConfig, type ShutroConfig } from './config.js';
@@ -22,3 +21,6 @@ export {
   renderBindings,
   renderSchema,
 } from './generate/render.js';
+export { initProject } from './init.js';
+export { inspectModel, inspectRegistry } from './inspect.js';
+export { databaseUrl, loadProject, type Project, withDriver } from './project.js';

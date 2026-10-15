@@ -40,6 +40,7 @@ import {
   type ResolvedIdentity,
   resolveIdentity,
 } from './identity.js';
+import type { Inspector } from './inspector.js';
 import { assertTimeZone, calendarDateIn } from './time.js';
 
 /** Typed context flags (RFC 0003 §7.4). Module-contributed flags arrive with the registry's second half. */
@@ -148,6 +149,8 @@ interface Runtime {
   readonly als: AsyncLocalStorage<Scope>;
   readonly onHookError: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
   readonly registry: Registry | undefined;
+  /** Dev-mode query inspector, if any. */
+  readonly inspector: Inspector | undefined;
   /** The pool, for autonomous transactions (standard sequences, RFC 0012 §7.2). */
   readonly driver: Driver;
   /** Encryption keys for `encrypted` fields (RFC 0014 §7.6), or none. */
@@ -488,7 +491,22 @@ export class Env<S = unknown> {
 
   async #query<R extends Row>(query: DriverQuery): Promise<readonly R[]> {
     this.#scope.root.queries++;
-    return this.#scope.conn.query<R>(query);
+    const inspector = this.#runtime.inspector;
+    if (inspector === undefined) return this.#scope.conn.query<R>(query);
+    const started = performance.now();
+    const base = { sql: query.text, params: query.params, tx: this.#scope.root.tx, uid: this.uid };
+    try {
+      const rows = await this.#scope.conn.query<R>(query);
+      inspector.record({ ...base, ms: performance.now() - started });
+      return rows;
+    } catch (error) {
+      inspector.record({
+        ...base,
+        ms: performance.now() - started,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   #derive(
@@ -718,6 +736,8 @@ export interface ShutroOptions<S> {
   readonly sourceLang?: string;
   /** Keys for `encrypted` fields (RFC 0014 §7.6): `createKeyRing({ current, keys })`. */
   readonly keys?: KeyRing;
+  /** Dev-mode query inspector (`createInspector()`): SQL, timings, N+1 warnings. */
+  readonly inspector?: Inspector;
   /** Retry policy for serialization failures and deadlocks. Default: 5 attempts with jittered exponential backoff. */
   readonly retry?: {
     readonly attempts?: number;
@@ -769,6 +789,7 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
     sourceLang: assertLang(options.sourceLang ?? 'en_US'),
     driver: options.driver,
     keys: options.keys,
+    inspector: options.inspector,
   };
   const NOW = compile(sqlTag`SELECT now() AS now`);
 

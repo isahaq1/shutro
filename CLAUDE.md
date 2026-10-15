@@ -195,7 +195,7 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Encrypted fields (AES-256-GCM with an application key ring, rotation by key id)
 
 ### Phase 5 — DX & performance
-- [ ] CLI, query inspector, schema explorer
+- [x] CLI, query inspector, schema explorer (shutro init | generate | migrate | inspect; createInspector with N+1 and slow warnings)
 - [ ] Bulk operations (COPY), partitioning support
 - [ ] Benchmarks in CI
 

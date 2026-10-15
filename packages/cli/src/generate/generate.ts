@@ -43,7 +43,8 @@ export interface GenerateResult {
   readonly modules: readonly string[];
 }
 
-async function loadSources(files: readonly string[]): Promise<Map<string, ModuleSource>> {
+/** Imports the module files of a config (one `defineModule` export each). */
+export async function loadSources(files: readonly string[]): Promise<Map<string, ModuleSource>> {
   const sources = new Map<string, ModuleSource>();
   for (const file of files) {
     if (!existsSync(file)) {
@@ -73,7 +74,8 @@ async function loadSources(files: readonly string[]): Promise<Map<string, Module
   return sources;
 }
 
-function dependant(registry: Registry, missing: string): string {
+/** The module that pulled in `missing` (for error messages). */
+export function dependant(registry: Registry, missing: string): string {
   const reaches = (m: ModuleBase): boolean =>
     m.depends.some((d) => d.name === missing || reaches(d));
   return registry.modules.find((m) => reaches(m))?.name ?? missing;
