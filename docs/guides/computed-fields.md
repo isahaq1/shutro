@@ -104,3 +104,17 @@ type is only known once the module is built.
 A draft can lack a required relation (a new line before its order is chosen). For those records the compute is
 skipped and the field stays empty until the relation is given, so inside a compute a required many2one in
 `depends` is always set: write `l.order.currency.id`, not `l.order?.currency.id`.
+
+## Related fields
+
+A related field mirrors a field at the end of a many2one path. It is a compute underneath, so a stored related
+field is recomputed when any step of the path changes, in batches, and audited like other stored computes.
+
+```ts
+partnerEmail: f.char({ ...related('partner.email', { writable: true }) }), // writes go to the partner
+countryCode: f.char({ store: true, ...related('partner.country.code') }),  // a column: searchable, sortable
+country: f.many2one('res.country', { store: true, ...related('partner.country') }),
+```
+
+The field's kind (and many2one target) must match the field the path ends at, and every step must be a
+many2one: both are checked when the registry is built. An empty step gives `null`.

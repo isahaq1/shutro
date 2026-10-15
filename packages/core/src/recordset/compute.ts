@@ -377,7 +377,12 @@ export async function computeFields(
       } else {
         const records = host.recordset(model, ids);
         const fn = typeof compute === 'string' ? model.methods[compute] : compute;
-        await (fn as (this: unknown, records: unknown) => unknown).call(records, records);
+        // The keys this compute fills come second, for generic computes such as related fields.
+        await (fn as (this: unknown, records: unknown, keys: readonly string[]) => unknown).call(
+          records,
+          records,
+          all.map((f) => f.key),
+        );
       }
     } finally {
       for (const n of names) {

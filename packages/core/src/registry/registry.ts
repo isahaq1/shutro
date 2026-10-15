@@ -54,6 +54,7 @@ import {
 import type { SequenceDefinition } from '@shutro/sequence';
 import { buildComputeGraph, type ComputeGraph } from '../compute/graph.js';
 import { validateData } from '../data/data.js';
+import { relatedPath } from '../model/related.js';
 
 type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
   x: infer I,
@@ -848,6 +849,41 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
     ((message: string): void => {
       process.emitWarning(message, { code: 'SHUTRO_ACCESS_WOULD_DENY' });
     });
+  // Related fields mirror a field of the same kind at the end of their path (many2one steps only).
+  for (const { model } of models.values()) {
+    for (const [key, field] of Object.entries(model.fields)) {
+      const path = relatedPath(field.compute);
+      if (path === undefined) continue;
+      const where = `Related field '${key}' of ${model.name} ('${path}')`;
+      let current: AnyModel = model;
+      const steps = path.split('.');
+      for (const [i, step] of steps.entries()) {
+        const f = current.fields[step];
+        if (f === undefined)
+          throw new InvalidRelationError(
+            `${where}: '${step}' is not a field of ${current.name}.`,
+            'Fix the path.',
+          );
+        if (i === steps.length - 1) {
+          const sameTarget = f.kind !== 'many2one' || targetOf(f) === targetOf(field);
+          if (f.kind !== field.kind || !sameTarget)
+            throw new InvalidRelationError(
+              `${where} is a ${field.kind}${field.kind === 'many2one' ? ` of ${targetOf(field)}` : ''}, but the path ends at a ${f.kind}${f.kind === 'many2one' ? ` of ${targetOf(f)}` : ''}.`,
+              'Declare the related field with the same kind (and target) as the field it mirrors.',
+            );
+          break;
+        }
+        if (f.kind !== 'many2one')
+          throw new InvalidRelationError(
+            `${where}: '${step}' is a ${f.kind}; related paths go through many2one fields.`,
+            'Use a compute for x2many paths.',
+          );
+        const next = models.get(targetOf(f) ?? '');
+        if (next === undefined) break; // the relation check reports unknown targets
+        current = next.model;
+      }
+    }
+  }
   const externalIds = validateData(modules, models);
   const registry: Registry<Simplify<SchemaOfModules<Mods>>> = {
     modules: Object.freeze(modules),
