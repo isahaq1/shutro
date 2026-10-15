@@ -22,7 +22,14 @@ import {
   computeFields,
   recompute,
 } from './compute.js';
+import { checkConstraints } from './constraints.js';
 import { compileDomain, compileOrder, scopingConditions } from './domain.js';
+import {
+  type OnchangeHost,
+  type OnchangeInputRaw,
+  type OnchangeResultRaw,
+  runOnchange,
+} from './onchange.js';
 import { junctionTable } from './relations.js';
 import {
   createRecords,
@@ -696,6 +703,16 @@ function computeHost(loader: Loader): ComputeHost {
   };
 }
 
+function onchangeHost(loader: Loader): OnchangeHost {
+  const write = writeHost(loader);
+  return {
+    ...computeHost(loader),
+    defaults: write.defaults,
+    children: write.children,
+    read: (model, ids, keys) => recordsetOf(loader, model, ids).read(keys),
+  };
+}
+
 function writeHost(loader: Loader): WriteHost {
   return {
     internals: loader.internals,
@@ -721,6 +738,7 @@ function writeHost(loader: Loader): WriteHost {
 export async function flushAll(internals: ScopeInternals, model?: string): Promise<void> {
   const loader: Loader = { env: internals.env, internals, registry: internals.registry };
   await recompute(computeHost(loader));
+  await checkConstraints(computeHost(loader));
   await flushDirty(writeHost(loader), model);
 }
 
@@ -733,6 +751,7 @@ export function modelRef(
   create(rows: readonly Readonly<Record<string, unknown>>[]): Promise<RecordSetImpl>;
   search(query?: unknown): Promise<RecordSetImpl>;
   browse(ids: readonly number[]): RecordSetImpl;
+  onchange(input: OnchangeInputRaw): Promise<OnchangeResultRaw>;
 } {
   const internals = internalsOf(env);
   const registered = internals.registry.get(name);
@@ -776,5 +795,6 @@ export function modelRef(
     browse(ids: readonly number[]): RecordSetImpl {
       return new RecordSetImpl(env, registered, [...ids], { ids: [...ids] }, undefined);
     },
+    onchange: (input) => runOnchange(onchangeHost(loader), model, input),
   };
 }

@@ -558,6 +558,7 @@ export async function flushDirty(host: WriteHost, modelName?: string): Promise<v
     const model = internals.registry.get(name).model;
     const groups = new Map<string, { fields: string[]; ids: number[] }>();
     for (const [id, fields] of dirty) {
+      if (id < 0) continue; // a draft (RFC 0009 §7.4)
       // A value invalidated by a trigger and not recomputed yet must not be written as null.
       const sorted = [...fields].filter((k) => host.values(name, id)?.has(k)).sort();
       if (sorted.length === 0) continue;

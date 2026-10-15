@@ -31,6 +31,8 @@ export {
   ComputeAssignmentError,
   ComputeCycleError,
   ConcurrentUpdateError,
+  ConstraintError,
+  ConstraintViolationError,
   CurrencyMismatchError,
   DivisionByZeroError,
   DuplicateModelError,
@@ -60,6 +62,7 @@ export {
   ShutroError,
   type ShutroErrorCode,
   SingletonError,
+  type SqlConstraintKind,
   TransactionScopeError,
   UndeclaredDependencyError,
   UnknownModelError,
@@ -114,6 +117,7 @@ export {
 } from './model/field.js';
 export type * as F from './model/generated.js';
 export { asId, type Id, type X2ManyCommands } from './model/id.js';
+export type { OnchangeFn } from './model/model.js';
 export {
   type ActiveField,
   type AnyModel,
@@ -165,16 +169,21 @@ export type {
   DefaultLoaded,
   Defaults,
   Domain,
+  Draft,
+  DraftValue,
   FieldsOf,
   IdOnly,
   ListKeys,
   ListLoaded,
   LoadedKeys,
   LoadSpec,
+  Many2oneKeys,
   Merge,
   ModelName,
   ModelRef,
   NotLoaded,
+  OnchangeInput,
+  OnchangeResult,
   PendingSet,
   PlainRow,
   Rec,
@@ -186,6 +195,7 @@ export type {
   Target,
   ToLoaded,
   WriteValues,
+  X2ManyKeys,
 } from './recordset/types.js';
 export { createTableStatements } from './registry/ddl.js';
 export {

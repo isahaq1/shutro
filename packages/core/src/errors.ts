@@ -35,7 +35,9 @@ export type ShutroErrorCode =
   | 'EXTENSION_CONFLICT'
   | 'COMPUTE_CYCLE'
   | 'COMPUTE_ASSIGNMENT'
-  | 'RECOMPUTE_LIMIT';
+  | 'RECOMPUTE_LIMIT'
+  | 'CONSTRAINT'
+  | 'CONSTRAINT_VIOLATION';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -378,5 +380,59 @@ export class RecomputeLimitError extends ShutroError {
       `Recompute did not settle after ${rounds} rounds; still pending: ${pending.join(', ')}.`,
       'A compute is probably writing one of its own dependencies. Computes must only assign their computed fields.',
     );
+  }
+}
+
+/** A business constraint found failing records at a flush point (RFC 0009 §7.1). */
+export class ConstraintError extends ShutroError {
+  readonly model: string;
+  readonly constraint: string;
+  /** The constraint's `depends`. */
+  readonly fields: readonly string[];
+  /** Ids of the failing records. */
+  readonly records: readonly number[];
+  constructor(
+    model: string,
+    constraint: string,
+    fields: readonly string[],
+    records: readonly number[],
+    message: string,
+  ) {
+    super(
+      'CONSTRAINT',
+      `${model}: ${message}`,
+      `Constraint '${constraint}' failed for record(s) ${records.join(', ')}.`,
+    );
+    this.model = model;
+    this.constraint = constraint;
+    this.fields = Object.freeze([...fields]);
+    this.records = Object.freeze([...records]);
+  }
+}
+
+/** Which kind of SQL constraint PostgreSQL reported. */
+export type SqlConstraintKind = 'unique' | 'check' | 'exclusion' | 'foreign_key';
+
+/** PostgreSQL rejected a statement because of a declared `sqlConstraints` entry or a foreign key (RFC 0009 §7.2). */
+export class ConstraintViolationError extends ShutroError {
+  readonly model: string;
+  /** The `sqlConstraints` key, or the many2one field for a foreign key. */
+  readonly constraint: string;
+  readonly kind: SqlConstraintKind;
+  readonly fields: readonly string[];
+  constructor(
+    model: string,
+    constraint: string,
+    kind: SqlConstraintKind,
+    fields: readonly string[],
+    message: string,
+    hint: string,
+    options?: { cause?: unknown },
+  ) {
+    super('CONSTRAINT_VIOLATION', `${model}: ${message}`, hint, options);
+    this.model = model;
+    this.constraint = constraint;
+    this.kind = kind;
+    this.fields = Object.freeze([...fields]);
   }
 }

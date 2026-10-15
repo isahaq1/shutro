@@ -58,6 +58,7 @@ const ON_DELETE: Readonly<Record<string, string>> = {
 export function createTableStatements(registry: Registry): readonly CompiledSql[] {
   const tables: string[] = [];
   const foreignKeys: string[] = [];
+  const constraints: string[] = [];
   const junctions = new Map<string, JunctionTable>();
 
   for (const { model } of registry.models.values()) {
@@ -83,6 +84,26 @@ export function createTableStatements(registry: Registry): readonly CompiledSql[
       }
     }
     tables.push(`CREATE TABLE ${ident(model.table)} (${columns.join(', ')})`);
+    // Declared SQL constraints (partial uniques are indexes and belong to the migrator).
+    for (const c of model.sqlConstraints) {
+      if (c.kind === 'unique' && c.where === undefined) {
+        constraints.push(
+          `ALTER TABLE ${ident(model.table)} ADD CONSTRAINT ${ident(c.name)} UNIQUE (${c.columns.map((col) => ident(col)).join(', ')})`,
+        );
+      } else if (c.check !== undefined) {
+        const compiled = compile(c.check);
+        if (compiled.params.length > 0) {
+          throw new InvalidModelError(
+            model.name,
+            `check constraint '${c.key}' contains ${compiled.params.length} parameter(s).`,
+            'DDL cannot take bind parameters: write the expression with literals only, e.g. sql`amount >= 0`.',
+          );
+        }
+        constraints.push(
+          `ALTER TABLE ${ident(model.table)} ADD CONSTRAINT ${ident(c.name)} CHECK (${compiled.text})`,
+        );
+      }
+    }
   }
 
   const junctionDdl = [...junctions.values()].map(
@@ -90,7 +111,7 @@ export function createTableStatements(registry: Registry): readonly CompiledSql[
       `CREATE TABLE ${ident(j.table)} (${ident(j.sourceColumn)} bigint NOT NULL REFERENCES ${ident(j.sourceTable)} (${ident('id')}) ON DELETE CASCADE, ${ident(j.targetColumn)} bigint NOT NULL REFERENCES ${ident(j.targetTable)} (${ident('id')}) ON DELETE CASCADE, PRIMARY KEY (${ident(j.sourceColumn)}, ${ident(j.targetColumn)}))`,
   );
 
-  return [...tables, ...foreignKeys, ...junctionDdl].map((text) =>
+  return [...tables, ...foreignKeys, ...constraints, ...junctionDdl].map((text) =>
     Object.freeze({ text, params: Object.freeze([]) }),
   );
 }
