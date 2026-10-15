@@ -14,6 +14,7 @@ import {
   CompanyNotAllowedError,
   ConcurrentUpdateError,
   FlagNotAllowedError,
+  InvalidIdentityError,
   NoEnvironmentError,
   NoRegistryError,
   TransactionScopeError,
@@ -748,6 +749,12 @@ export interface ShutroOptions<S> {
   readonly keys?: KeyRing;
   /** Dev-mode query inspector (`createInspector()`): SQL, timings, N+1 warnings. */
   readonly inspector?: Inspector;
+  /**
+   * Verifies identities against the application's data (RFC 0014 §7.1, docs/feedback.md #6): returns the user's
+   * allowed companies and groups, or `null` for an unknown or disabled user. When set, `run()` refuses companies
+   * outside the allowed set and groups the user does not have, and uses the loaded groups when none are given.
+   */
+  readonly identity?: (uid: number) => Promise<VerifiedIdentity | null>;
   /** Retry policy for serialization failures and deadlocks. Default: 5 attempts with jittered exponential backoff. */
   readonly retry?: {
     readonly attempts?: number;
@@ -759,6 +766,12 @@ export interface ShutroOptions<S> {
    * error cannot be surfaced to the caller). Defaults to `process.emitWarning`.
    */
   readonly onHookError?: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
+}
+
+/** What an identity loader returns for a user. */
+export interface VerifiedIdentity {
+  readonly companies: readonly number[];
+  readonly groups: readonly string[];
 }
 
 /** A Shutro instance: one driver, one registry, one AsyncLocalStorage. No global state (`CLAUDE.md`). */
@@ -805,7 +818,31 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
 
   return {
     async run<T>(runOptions: RunOptions, fn: (env: Env<S>) => Promise<T>): Promise<T> {
-      const identity = resolveIdentity(runOptions);
+      let identity = resolveIdentity(runOptions);
+      if (options.identity !== undefined) {
+        const verified = await options.identity(identity.uid);
+        if (verified === null) {
+          throw new InvalidIdentityError(
+            `User ${identity.uid} is unknown or disabled.`,
+            'The identity loader returned no record for this user: check the session, or reactivate the user.',
+          );
+        }
+        for (const company of identity.companyIds) {
+          if (!verified.companies.includes(company))
+            throw new CompanyNotAllowedError(company, verified.companies);
+        }
+        const asked = runOptions.groups;
+        if (asked !== undefined) {
+          const extra = asked.filter((g) => !verified.groups.includes(g));
+          if (extra.length > 0) {
+            throw new InvalidIdentityError(
+              `User ${identity.uid} is not in group(s) ${extra.join(', ')}.`,
+              'Pass only groups the user has (or omit groups to use the loaded ones).',
+            );
+          }
+        }
+        identity = { ...identity, groups: Object.freeze([...(asked ?? verified.groups)]) };
+      }
       const groups =
         options.registry === undefined
           ? new Set(identity.groups)

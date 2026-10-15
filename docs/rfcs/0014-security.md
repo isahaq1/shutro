@@ -134,6 +134,16 @@ without the key or with a tampered token is an `EncryptionError`. Encrypted fiel
 `env.asSuperuser({ reason }, fn)`: ACL, rules and field groups are skipped for `fn`'s environment, `shutro.su` is
 `'1'` for the call, and an audit `su` row is written (RFC 0013). Multi-company checks still apply (RFC 0003 §7.6).
 
+### 7.8 Relation paths and verified identities (amendment)
+
+Domains accept dotted many2one paths and x2many `{ any | none }` (feedback #11). A path segment compiles to
+`col IN (SELECT "id" FROM target WHERE …)` (`none` on a many2one also matches `NULL`), a one2many to
+`"id" IN (SELECT inverse FROM target WHERE …)` and a many2many through its junction table. Sub-selects, not joins, so
+the same SQL is valid inside RLS policies and never duplicates rows. Inner domains are compiled without the target's
+rules: a rule on lines says what lines are visible, not which orders. User domains are checked along the path
+(field groups, target read ACL). An optional `identity` loader on `createShutro` verifies each run's user, companies
+and groups (feedback #6).
+
 ## 8. Type-level guarantees
 
 `access` perms and rule perms are literal unions; `env.access.can(model, perm)` takes model names of the schema;

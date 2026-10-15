@@ -1,7 +1,8 @@
 /**
- * Compiles a search domain (RFC 0005 §7.1 subset: fields of the model itself, ANDed) plus automatic scoping
- * (`active`, companies) into a WHERE fragment. Relation paths, `or` / `not`, `any` / `all` / `none` and record
- * rules come with the full domain compiler.
+ * Compiles a search domain (RFC 0005 §7.1) plus automatic scoping (`active`, companies) into WHERE fragments:
+ * field conditions ANDed, `or` / `and` / `not`, dotted relation paths (`'partner.name'`, `'order.user'`) and
+ * `{ lines: { any | none: domain } }` on x2many fields. Relations compile to sub-selects, never joins, so rows are
+ * never duplicated (RFC 0005 R8).
  */
 
 import { type SqlFragment, sql } from '@shutro/sql';
@@ -10,6 +11,10 @@ import type { Env } from '../env/env.js';
 import { InvalidDomainError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
+import { junctionTable } from './relations.js';
+
+/** Resolves a model by name (the registry), needed for relation paths. */
+export type ModelResolver = (name: string) => AnyModel;
 
 const OPERATORS = new Set([
   'eq',
@@ -133,6 +138,7 @@ export function compileDomain(
   model: AnyModel,
   where: Readonly<Record<string, unknown>> | undefined,
   translation?: TranslationScope,
+  resolve?: ModelResolver,
 ): SqlFragment[] {
   const conditions: SqlFragment[] = [];
   for (const [key, value] of Object.entries(where ?? {})) {
@@ -144,7 +150,7 @@ export function compileDomain(
           "Use { or: [{ state: 'draft' }, { user: 7 }] }.",
         );
       const parts = value.map((d) => {
-        const inner = compileDomain(model, d as Record<string, unknown>, translation);
+        const inner = compileDomain(model, d as Record<string, unknown>, translation, resolve);
         return inner.length === 0 ? sql`TRUE` : sql`(${sql.join(inner, sql` AND `)})`;
       });
       if (parts.length > 0)
@@ -152,8 +158,39 @@ export function compileDomain(
       continue;
     }
     if (key === 'not') {
-      const inner = compileDomain(model, value as Record<string, unknown>, translation);
+      const inner = compileDomain(model, value as Record<string, unknown>, translation, resolve);
       if (inner.length > 0) conditions.push(sql`NOT (${sql.join(inner, sql` AND `)})`);
+      continue;
+    }
+    const dot = key.indexOf('.');
+    if (dot > 0) {
+      // 'partner.name': the condition on the related model, as a sub-select.
+      conditions.push(
+        relation(
+          model,
+          key.slice(0, dot),
+          { [key.slice(dot + 1)]: value },
+          'any',
+          translation,
+          resolve,
+        ),
+      );
+      continue;
+    }
+    const relField = model.fields[key];
+    if (relField !== undefined && (relField.kind === 'one2many' || relField.kind === 'many2many')) {
+      if (!isOperators(value) || Object.keys(value).some((k) => k !== 'any' && k !== 'none'))
+        throw new InvalidDomainError(
+          `'${key}' is a ${relField.kind}: filter it with { any: domain } or { none: domain }.`,
+          `E.g. { ${key}: { any: { quantity: { gt: 10 } } } }.`,
+        );
+      for (const mode of ['any', 'none'] as const) {
+        const inner = value[mode];
+        if (inner !== undefined)
+          conditions.push(
+            relation(model, key, inner as Record<string, unknown>, mode, translation, resolve),
+          );
+      }
       continue;
     }
     const { column: col } = column(model, key, translation);
@@ -173,6 +210,59 @@ export function compileDomain(
     }
   }
   return conditions;
+}
+
+/**
+ * A condition through relation `key`: records related to at least one (`any`) or no (`none`) record of the target
+ * matching `inner`.
+ */
+function relation(
+  model: AnyModel,
+  key: string,
+  inner: Readonly<Record<string, unknown>>,
+  mode: 'any' | 'none',
+  translation: TranslationScope | undefined,
+  resolve: ModelResolver | undefined,
+): SqlFragment {
+  const field = model.fields[key];
+  const targetName = (field as { target?: string } | undefined)?.target;
+  if (field === undefined || targetName === undefined) {
+    throw new InvalidDomainError(
+      `'${key}' is not a relation of ${model.name}, so it cannot start a path.`,
+      `Paths go through many2one, one2many or many2many fields of ${model.name}.`,
+    );
+  }
+  if (resolve === undefined) {
+    throw new InvalidDomainError(
+      `Relation path '${key}.…' needs the registry.`,
+      'This compiler call has no model resolver.',
+    );
+  }
+  const target = resolve(targetName);
+  const conditions = compileDomain(target, inner, translation, resolve);
+  const where =
+    conditions.length === 0 ? sql.empty : sql` WHERE ${sql.join(conditions, sql` AND `)}`;
+  const targets = sql`SELECT ${sql.id('id')} FROM ${sql.id(target.table)}${where}`;
+  let match: SqlFragment;
+  if (field.kind === 'many2one') {
+    const col = sql.id(model.columns[key] ?? '');
+    return mode === 'any'
+      ? sql`${col} IN (${targets})`
+      : sql`(${col} IS NULL OR ${col} NOT IN (${targets}))`;
+  }
+  if (field.kind === 'one2many') {
+    const inverse = sql.id(
+      target.columns[(field as { inverseField?: string }).inverseField ?? ''] ?? '',
+    );
+    const and = conditions.length === 0 ? sql.empty : sql` AND ${sql.join(conditions, sql` AND `)}`;
+    match = sql`SELECT ${inverse} FROM ${sql.id(target.table)} WHERE ${inverse} IS NOT NULL${and}`;
+  } else {
+    const j = junctionTable(model, field, target);
+    match = sql`SELECT ${sql.id(j.sourceColumn)} FROM ${sql.id(j.table)} WHERE ${sql.id(j.targetColumn)} IN (${targets})`;
+  }
+  return mode === 'any'
+    ? sql`${sql.id('id')} IN (${match})`
+    : sql`${sql.id('id')} NOT IN (${match})`;
 }
 
 /** Conditions the environment adds to every search (RFC 0005 §7.4): archived records and company scope. */

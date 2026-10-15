@@ -113,7 +113,11 @@ insert the first one. The seed uses raw SQL.
 null when the acting user row does not exist yet.
 
 ### #6 — The identity is not checked against the database
-`security` · S3
+`security` · S3 · **fixed** in `feat/security-paths` (`paths.integration.test.ts`)
+
+*Resolution:* `createShutro({ identity: async (uid) => ({ companies, groups }) | null })`. Every `run` verifies the user
+(unknown → `InvalidIdentityError`), each requested company (→ `CompanyNotAllowedError`) and requested groups (must be a
+subset); omitted groups come from the loader.
 
 `shutro.run({ user, company, companies, groups })` trusts the caller: the company need not exist, the user need not be
 allowed in it, and groups come from the application. That is by design (RFC 0003), but nothing helps an application
@@ -156,7 +160,11 @@ see #4).
 **Proposal:** run child handlers for the fields given in each `create` row, inside the parent draft.
 
 ### #11 — Domains cannot follow relations
-`security` `api` · S2
+`security` `api` · S2 · **fixed** in `feat/security-paths` (`paths.integration.test.ts`)
+
+*Resolution:* dotted many2one paths (`'order.user'`, `'partner.country.code'`) and x2many `{ any | none: domain }`
+compile to `IN (SELECT …)` sub-selects, in searches, record rules and generated RLS policies. Field groups and the
+target's read ACL are checked along the path, so a hidden field cannot be probed through it.
 
 `{ 'order.user': { $env: 'uid' } }` is not supported, so a record rule cannot say "lines of my orders": in the demo
 every salesperson can read every order line. Searches cannot filter orders by `partner.name` either.

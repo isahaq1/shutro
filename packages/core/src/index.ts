@@ -48,6 +48,7 @@ export {
   type PathStep,
   type Trigger,
 } from './compute/graph.js';
+export type { VerifiedIdentity } from './env/env.js';
 export {
   createShutro,
   Env,

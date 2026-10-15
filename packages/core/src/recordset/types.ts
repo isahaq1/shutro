@@ -257,10 +257,18 @@ export type Domain<S, M extends ModelName<S>> = {
     ? Id<M> | DomainOperators<Id<M>>
     : DomainValue<FieldsOf<S, M>[K]>;
 } & {
+  /** Records with at least one / no related record matching the domain. */
+  readonly [K in X2ManyKeys<S, M>]?: {
+    readonly any?: Domain<S, Target<S, M, K>>;
+    readonly none?: Domain<S, Target<S, M, K>>;
+  };
+} & {
   /** Any of the domains. */
   readonly or?: readonly Domain<S, M>[];
   readonly and?: readonly Domain<S, M>[];
   readonly not?: Domain<S, M>;
+  /** A relation path such as `'partner.name'` (checked at runtime; typed paths come with the generator). */
+  readonly [path: `${string}.${string}`]: unknown;
 };
 /** `'field'`, `'field asc'` or `'field desc'` over sortable (non-x2many) fields. */
 export type SearchOrder<S, M extends ModelName<S>> =
