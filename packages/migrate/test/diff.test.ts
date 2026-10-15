@@ -76,7 +76,7 @@ describe('desiredSchema', () => {
     expect(order?.columns['amount']).toMatchObject({
       type: 'numeric(32,2)',
       nullable: false,
-      default: null,
+      default: '0', // literal defaults are database defaults (feedback #3)
     });
     expect(order?.columns['created_at']).toMatchObject({
       type: 'timestamp with time zone',
@@ -189,9 +189,9 @@ describe('diffSchema', () => {
     const nullable = desiredSchema(registryOf({ code: f.char() }));
     const required = desiredSchema(registryOf({ code: f.char({ required: true, default: 'x' }) }));
     const tighten = diffSchema(required, nullable as unknown as LiveSchema);
-    expect(tighten.map((o) => o.kind)).toEqual(['backfill', 'setNotNull']);
+    expect(tighten.map((o) => o.kind)).toEqual(['setDefault', 'backfill', 'setNotNull']);
     const relax = diffSchema(nullable, required as unknown as LiveSchema);
-    expect(relax.map((o) => o.kind)).toEqual(['dropNotNull']);
+    expect(relax.map((o) => o.kind)).toEqual(['dropDefault', 'dropNotNull']);
   });
 
   test('constraint and index changes', () => {

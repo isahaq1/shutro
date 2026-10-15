@@ -981,7 +981,13 @@ export function modelRef(
       ]);
       const translation = translationScope(internals);
       const conditions = [
-        ...compileDomain(model, query.where, translation, (n) => internals.registry.get(n).model),
+        ...compileDomain(
+          model,
+          query.where,
+          translation,
+          (n) => internals.registry.get(n).model,
+          (target) => ruleConditions(internals, target, 'read'),
+        ),
         ...scopingConditions(model, env),
         ...ruleConditions(internals, model, 'read'),
       ];

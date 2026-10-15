@@ -86,7 +86,11 @@ with different types.
 write face), or generate accessor interfaces per model.
 
 ### #3 — Defaults live in the ORM, not in the database
-`dx` · S3
+`dx` · S3 · **fixed** (`columnDefault` in core, used by the DDL stopgap and the migrator)
+
+*Resolution:* boolean, non-negative numeric, text, selection, state and date literals are SQL `DEFAULT`s in the
+form PostgreSQL's catalog shows them, so plans stay empty after applying (`migrate.integration.test.ts`). Function,
+translated, encrypted, numbered and negative defaults stay in the ORM.
 
 `f.decimal({ default: '0.01' })`, `f.char({ default })`, `f.date({ default })` produce no SQL `DEFAULT`, so any raw
 `INSERT` (fixtures, data migrations, other services) must spell every required column. Hit four times while writing
