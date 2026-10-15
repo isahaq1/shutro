@@ -4,9 +4,9 @@
  * in order.
  */
 
-import { ComputeCycleError } from '../errors.js';
+import { ComputeCycleError, InvalidDependsPathError } from '../errors.js';
 import type { Field } from '../model/field.js';
-import { type AnyModel, defaultDisplayName } from '../model/model.js';
+import { type AnyModel, defaultDisplayName, type ResolvedConstraint } from '../model/model.js';
 
 /** One step of a depends path: field `key` of `model`, leading to `target` for relations. */
 export interface PathStep {
@@ -47,6 +47,8 @@ export interface ComputeGraph {
   stored(model: string): readonly ComputedField[];
   /** many2one keys of `model` that are inverses of one2many steps in some path: changing or deleting them moves records between parents. */
   inverseKeys(model: string): ReadonlySet<string>;
+  /** Business constraints of `model` that a change of `key` triggers (RFC 0009 §7.1). */
+  constraints(model: string, key: string): readonly ResolvedConstraint[];
 }
 
 type Models = ReadonlyMap<string, { readonly model: AnyModel }>;
@@ -168,6 +170,28 @@ export function buildComputeGraph(models: Models): ComputeGraph {
     }
   }
 
+  // Constraints: depends are same-model field keys (RFC 0009 §7.1).
+  const constraintIndex = new Map<string, Map<string, ResolvedConstraint[]>>();
+  for (const { model } of models.values()) {
+    for (const c of model.constraints) {
+      for (const dep of c.depends) {
+        if (dep.includes('.') || model.fields[dep] === undefined) {
+          throw new InvalidDependsPathError(
+            `The depends '${dep}' of constraint '${c.key}' on '${model.name}' is not a field of the model.`,
+            'Constraint depends are field keys of the model itself (no dotted paths); put the rule on the model that owns the data, or depend on a computed field.',
+          );
+        }
+        let byKey = constraintIndex.get(model.name);
+        if (byKey === undefined) {
+          byKey = new Map();
+          constraintIndex.set(model.name, byKey);
+        }
+        byKey.set(dep, [...(byKey.get(dep) ?? []), c]);
+      }
+    }
+  }
+  const noConstraints: readonly ResolvedConstraint[] = Object.freeze([]);
+
   const none: readonly ComputedField[] = Object.freeze([]);
   const empty: ReadonlySet<string> = new Set();
   const storedByModel = new Map<string, ComputedField[]>();
@@ -183,5 +207,6 @@ export function buildComputeGraph(models: Models): ComputeGraph {
     field: (model, key) => byName.get(`${model}.${key}`),
     stored: (model) => storedByModel.get(model) ?? none,
     inverseKeys: (model) => inverses.get(model) ?? empty,
+    constraints: (model, key) => constraintIndex.get(model)?.get(key) ?? noConstraints,
   };
 }

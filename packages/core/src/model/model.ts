@@ -148,6 +148,8 @@ export interface ConstraintSpec {
   readonly check: (records: never) => unknown;
   readonly message: string | ((failing: never) => string);
 }
+/** An onchange handler (RFC 0009 §7.3): receives the draft and the environment. Typed by the recordset layer. */
+export type OnchangeFn = (draft: never, env: never) => void | Promise<void>;
 
 /** The argument of {@link defineModel} after `name`. */
 export interface ModelDefinition<
@@ -175,6 +177,8 @@ export interface ModelDefinition<
     Record<string, SqlUniqueConstraint<ModelKeys<Fs, A, C>> | SqlCheckConstraint>
   >;
   readonly constraints?: Readonly<Record<string, ConstraintSpec>>;
+  /** Form-assist handlers keyed by the field they react to (RFC 0009 §7.3). */
+  readonly onchange?: Readonly<Record<string, OnchangeFn>>;
 }
 
 type ModelKeys<
@@ -361,6 +365,7 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly indexes: readonly ResolvedIndex<keyof Fs & string>[];
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
+  readonly onchange: Readonly<Record<string, OnchangeFn>>;
   readonly methods: Ms;
   /** Keys of the fields the model declared itself (implicit fields excluded); extensions add to these. */
   readonly declaredFields: readonly string[];
@@ -434,6 +439,8 @@ export interface ModelDescription {
     readonly message: string | null;
   }[];
   readonly methods: readonly string[];
+  /** Fields with an onchange handler. */
+  readonly onchange: readonly string[];
 }
 
 // --------------------------------------------------------------------------------------------------- helpers
@@ -830,6 +837,16 @@ export function defineModel<
     },
   );
 
+  // --- onchange handlers
+  const onchange: Record<string, OnchangeFn> = {};
+  for (const [key, fn] of Object.entries(definition.onchange ?? {})) {
+    if (!has(key))
+      fail(name, `onchange key '${key}' is not a field.`, `Fields: ${keys.join(', ')}.`);
+    if (typeof fn !== 'function')
+      fail(name, `onchange '${key}' is not a function.`, 'Pass (draft, env) => { ... }.');
+    onchange[key] = fn;
+  }
+
   const model = {
     name,
     table,
@@ -847,6 +864,7 @@ export function defineModel<
     indexes: Object.freeze(indexes),
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),
+    onchange: Object.freeze(onchange),
     methods: Object.freeze(methods),
     declaredFields: Object.freeze(Object.keys(user)),
     definition: Object.freeze({ ...definition }) as unknown as ModelDefinition<
@@ -972,5 +990,6 @@ function describeModel(model: AnyModel): ModelDescription {
       message: typeof c.message === 'string' ? c.message : null,
     })),
     methods: Object.keys(model.methods),
+    onchange: Object.keys(model.onchange),
   };
 }

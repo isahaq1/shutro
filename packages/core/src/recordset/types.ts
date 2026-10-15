@@ -5,9 +5,11 @@
  * Shapes are `{ s: <loaded field keys>; r: { <relation>: <shape> } }` and are read through `infer` helpers
  * (spike 0001, lesson 2).
  */
+
 import type { Env } from '../env/env.js';
 import type { CreateOf, FlagsOfField, ReadValue, WriteOf, WriteType } from '../model/faces.js';
-import type { Id } from '../model/id.js';
+import type { Id, X2ManyCommands } from '../model/id.js';
+import type { Decimal } from '../money/decimal.js';
 import type { MoneyJson } from '../money/money.js';
 
 /** Model names of a schema view. */
@@ -257,6 +259,8 @@ export interface ModelRef<S, M extends ModelName<S>> {
   search(query?: SearchQuery<S, M>): Promise<RecordSet<S, M, DefaultLoaded<S, M>>>;
   /** A lazy recordset of these ids. Nothing is fetched until `load()`. */
   browse(ids: readonly number[]): PendingSet<S, M>;
+  /** Form assist on an in-memory draft: derived values and warnings, nothing written (RFC 0009 §7.4). */
+  onchange(input: OnchangeInput<S, M>): Promise<OnchangeResult<S, M>>;
 }
 
 // ------------------------------------------------------------------------------------------------ computes
@@ -280,3 +284,57 @@ export type ComputeSet<S, M extends ModelName<S>, L> = Omit<
   first(): ComputeRec<S, M, L>;
   ensureOne(): ComputeRec<S, M, L>;
 };
+
+// ------------------------------------------------------------------------------------------------- onchange
+
+/** Many2one keys. */
+export type Many2oneKeys<S, M extends ModelName<S>> = {
+  [K in Keys<S, M>]: KindOf<FieldsOf<S, M>[K]> extends 'many2one' ? K : never;
+}[Keys<S, M>];
+/** x2many keys. */
+export type X2ManyKeys<S, M extends ModelName<S>> = {
+  [K in Keys<S, M>]: IsX2Many<FieldsOf<S, M>[K]> extends true ? K : never;
+}[Keys<S, M>];
+
+/** What a draft holds for a field: an id for many2one, commands for x2many, a Decimal for amounts, read values otherwise. */
+export type DraftValue<S, M extends ModelName<S>, K extends Keys<S, M>> =
+  IsX2Many<FieldsOf<S, M>[K]> extends true
+    ? X2ManyCommands<Target<S, M, K>> | undefined
+    : KindOf<FieldsOf<S, M>[K]> extends 'many2one'
+      ? Id<Target<S, M, K>> | null
+      : KindOf<FieldsOf<S, M>[K]> extends 'monetary' | 'quantity'
+        ? Decimal | null
+        : ReadValue<FieldsOf<S, M>[K]> | null;
+
+/** The draft an onchange handler receives (RFC 0009 §7.3). */
+export interface Draft<S, M extends ModelName<S>> {
+  readonly id: Id<M> | null;
+  readonly env: Env<S>;
+  get<K extends Keys<S, M>>(key: K): DraftValue<S, M, K>;
+  /** Normalized like a write; `null` is always accepted in a draft. Marks the key changed (its handler runs next). */
+  set<K extends Keys<S, M>>(key: K, value: WriteType<FieldsOf<S, M>[K]> | null): void;
+  /** The related record of a many2one, loaded with its defaults, or null. */
+  record<K extends Many2oneKeys<S, M>>(
+    key: K,
+  ): Promise<Rec<S, Target<S, M, K>, DefaultLoaded<S, Target<S, M, K>>> | null>;
+  warn(message: string): void;
+}
+
+/** The input of `env.model(M).onchange()`. */
+export interface OnchangeInput<S, M extends ModelName<S>> {
+  /** An existing record: its values are the base of the draft. */
+  readonly id?: Id<M> | undefined;
+  /** The form's values (x2many as commands; `create` rows become virtual children). */
+  readonly values: { readonly [K in Keys<S, M>]?: WriteType<FieldsOf<S, M>[K]> | null };
+  /** Fields whose handlers run, in order. */
+  readonly changed: readonly Keys<S, M>[];
+}
+
+/** The output of `env.model(M).onchange()`. */
+export interface OnchangeResult<S, M extends ModelName<S>> {
+  /** Scalar and many2one fields whose plain value differs from the input. */
+  readonly values: Partial<PlainRow<S, M, Exclude<ScalarKeys<S, M> | Many2oneKeys<S, M>, 'id'>>>;
+  readonly warnings: readonly string[];
+  /** Plain rows of the virtual children created by `create` commands, per x2many field. */
+  readonly children: { readonly [K in X2ManyKeys<S, M>]?: readonly Record<string, unknown>[] };
+}

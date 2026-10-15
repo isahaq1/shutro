@@ -21,6 +21,7 @@ import {
   type FieldDescription,
   type IndexSpec,
   type ModelDescription,
+  type OnchangeFn,
   type SqlCheckConstraint,
   type SqlUniqueConstraint,
 } from '../model/model.js';
@@ -203,6 +204,7 @@ interface Draft {
   readonly methods: Record<string, AnyFn>;
   readonly methodLayers: Record<string, MethodLayer[]>;
   readonly constraints: Record<string, ConstraintSpec>;
+  readonly onchange: Record<string, OnchangeFn>;
   readonly sqlConstraints: Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>;
   readonly indexes: IndexSpec<string>[];
   readonly tracking: string[];
@@ -224,6 +226,7 @@ function draftOf(model: AnyModel, module: string): Draft {
     methods: { ...(model.methods as Record<string, AnyFn>) },
     methodLayers,
     constraints: { ...(def.constraints ?? {}) },
+    onchange: { ...(def.onchange ?? {}) },
     sqlConstraints: { ...(def.sqlConstraints ?? {}) } as Record<
       string,
       SqlUniqueConstraint<string> | SqlCheckConstraint
@@ -400,6 +403,16 @@ function applyExtension(
       conflict('constraint', key, draft.module, 'Use a different constraint key.');
     draft.constraints[key] = spec;
   }
+  for (const [key, fn] of Object.entries(ext.onchange)) {
+    if (draft.onchange[key] !== undefined)
+      conflict(
+        'onchange',
+        key,
+        draft.module,
+        'Call a shared method from the existing handler instead.',
+      );
+    draft.onchange[key] = fn;
+  }
   for (const [key, spec] of Object.entries(ext.sqlConstraints)) {
     if (draft.sqlConstraints[key] !== undefined)
       conflict(
@@ -423,6 +436,7 @@ function finalize(draft: Draft): RegisteredModel {
     fields: draft.fields,
     methods: draft.methods,
     constraints: draft.constraints,
+    onchange: draft.onchange,
     sqlConstraints: draft.sqlConstraints,
     indexes: draft.indexes,
     tracking: draft.tracking,

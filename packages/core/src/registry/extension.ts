@@ -9,6 +9,7 @@ import {
   type FieldsRecord,
   type IndexSpec,
   type MethodsRecord,
+  type OnchangeFn,
   RESERVED_KEYS,
   type SqlCheckConstraint,
   type SqlUniqueConstraint,
@@ -62,6 +63,8 @@ export interface ExtensionDefinition<Fs extends FieldsRecord, Ms extends Methods
   /** Wrappers of existing methods, receiving `next`. */
   readonly overrides?: Readonly<Record<string, OverrideFn | Replacement>>;
   readonly constraints?: Readonly<Record<string, ConstraintSpec>>;
+  /** Onchange handlers for fields without one (an existing key is a conflict). */
+  readonly onchange?: Readonly<Record<string, OnchangeFn>>;
   readonly sqlConstraints?: Readonly<
     Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>
   >;
@@ -84,6 +87,7 @@ export interface Extension<
     Record<string, { readonly kind: 'override' | 'replace'; readonly fn: OverrideFn }>
   >;
   readonly constraints: Readonly<Record<string, ConstraintSpec>>;
+  readonly onchange: Readonly<Record<string, OnchangeFn>>;
   readonly sqlConstraints: Readonly<
     Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>
   >;
@@ -206,6 +210,7 @@ export function extendModel<
     methods: Object.freeze({ ...methods }) as Ms,
     overrides: Object.freeze(overrides),
     constraints: Object.freeze({ ...(definition.constraints ?? {}) }),
+    onchange: Object.freeze({ ...(definition.onchange ?? {}) }),
     sqlConstraints: Object.freeze({ ...(definition.sqlConstraints ?? {}) }),
     indexes: Object.freeze([...(definition.indexes ?? [])]),
     tracking: Object.freeze([...(definition.tracking ?? [])]),

@@ -17,6 +17,7 @@ import {
 } from '../errors.js';
 import { invalidateCached } from '../recordset/compute.js';
 import { createRecordCache, flushAll, modelRef, type RecordCache } from '../recordset/recordset.js';
+import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ModelName, ModelRef } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
 import {
@@ -107,7 +108,11 @@ interface RootScope {
   readonly triggers: Map<string, Map<string, Set<number>>>;
   /** Records marked for computation directly (new records): model → key → ids. */
   readonly toCompute: Map<string, Map<string, Set<number>>>;
+  /** Records to check: model → constraint key → ids (RFC 0009 §7.1). */
+  readonly toCheck: Map<string, Map<string, Set<number>>>;
   readonly compute: ComputeState;
+  /** Next virtual id for drafts (negative, RFC 0009 §7.4). */
+  virtual: number;
   readonly uid: number;
 }
 
@@ -153,6 +158,10 @@ export interface ScopeInternals {
   takeTriggers(): Map<string, Map<string, Set<number>>>;
   takeToCompute(): Map<string, Map<string, Set<number>>>;
   hasPending(): boolean;
+  takeToCheck(): Map<string, Map<string, Set<number>>>;
+  hasChecks(): boolean;
+  /** A fresh negative id for a draft record (RFC 0009 §7.4). */
+  nextVirtualId(): number;
   readonly compute: ComputeState;
 }
 
@@ -472,7 +481,13 @@ function scopeInternals(
     cache: root.cache,
     uid: root.uid,
     now: root.now,
-    query,
+    query: async <R extends Row>(q: DriverQuery): Promise<readonly R[]> => {
+      try {
+        return await query<R>(q);
+      } catch (error) {
+        throw mapConstraintError(registry, error);
+      }
+    },
     journal(entry) {
       root.top.journal?.push(entry);
     },
@@ -503,12 +518,16 @@ function scopeInternals(
     forget(model, id) {
       root.cache.records.get(model)?.delete(id);
       root.dirty.get(model)?.delete(id);
+      for (const sets of [root.triggers, root.toCompute, root.toCheck])
+        for (const set of sets.get(model)?.values() ?? []) set.delete(id);
     },
     cachedValues: (model) => root.cache.records.get(model)?.values() ?? [],
     flush: (model) => flushAll(internalsOf(env), model),
     trigger(model, key, ids) {
       if (ids.length === 0) return;
       addIds(root.triggers, model, key, ids);
+      for (const c of registry.compute.constraints(model, key))
+        addIds(root.toCheck, model, c.key, ids);
       invalidateCached(self, model, key, ids);
     },
     markToCompute: (model, key, ids) => addIds(root.toCompute, model, key, ids),
@@ -523,6 +542,13 @@ function scopeInternals(
       return taken;
     },
     hasPending: () => root.triggers.size > 0 || root.toCompute.size > 0,
+    takeToCheck() {
+      const taken = new Map(root.toCheck);
+      root.toCheck.clear();
+      return taken;
+    },
+    hasChecks: () => root.toCheck.size > 0,
+    nextVirtualId: () => root.virtual--,
     compute: root.compute,
   };
   return self;
@@ -671,6 +697,8 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 dirty: new Map(),
                 triggers: new Map(),
                 toCompute: new Map(),
+                toCheck: new Map(),
+                virtual: -1,
                 compute: { recomputing: false, computing: new Set(), protected: new Map() },
                 uid: identity.uid,
               };
