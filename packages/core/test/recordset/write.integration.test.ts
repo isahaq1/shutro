@@ -371,6 +371,26 @@ describe('write and flush', () => {
   });
 });
 
+describe('cache coherence', () => {
+  test('a written, unflushed value survives a reload of the same record for other fields', async () => {
+    await run(async (env) => {
+      const partner = await env.model('res.partner').browse([ids.acme]).load(['name']);
+      await partner.write({ name: 'Renamed, not flushed' });
+      // Loading the default fields re-reads the row (email etc. are missing): the cached name must win.
+      const again = await env.model('res.partner').browse([ids.acme]).load();
+      expect(again.first().name).toBe('Renamed, not flushed');
+      await env.flush();
+      const [row] = await env.sql<{
+        name: string;
+      }>`SELECT name FROM res_partner WHERE id = ${ids.acme}`;
+      expect(row?.name).toBe('Renamed, not flushed');
+      throw new Error('rollback');
+    }).catch((e: unknown) => {
+      if (!(e instanceof Error) || e.message !== 'rollback') throw e;
+    });
+  });
+});
+
 describe('unlink', () => {
   test('deletes records (and cascades lines), cleans the cache', async () => {
     await run(async (env) => {

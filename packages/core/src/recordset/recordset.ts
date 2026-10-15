@@ -176,6 +176,9 @@ function hydrate(
     const column = model.columns[key];
     if (column === undefined || key === 'id') continue;
     const field = model.fields[key] as Field;
+    // The cache is authoritative within the transaction: a value written or computed here (possibly not flushed
+    // yet) must not be replaced by the row's older value. Only fill keys that are not cached.
+    if (values.has(key)) continue;
     values.set(key, loadedValue(loader.internals, field, row[column] ?? null));
   }
   return id;
@@ -762,6 +765,7 @@ export class RecordSetImpl {
     if (field.kind === 'monetary') {
       if (raw === null) return null;
       const currencyId = values.get((field as unknown as { currencyField: string }).currencyField);
+      if (currencyId === null) return null; // no currency, no Money (e.g. a draft line without its order yet)
       const currency =
         typeof currencyId === 'number' ? cache.currencies.get(currencyId) : undefined;
       if (currency === undefined) {

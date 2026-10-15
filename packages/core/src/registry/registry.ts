@@ -317,7 +317,10 @@ function applyExtension(
       field.required &&
       field.default === undefined &&
       !field.computed &&
-      field.kind !== 'boolean'
+      field.kind !== 'boolean' &&
+      // x2many relations are "required" only in the sense that they always hold a (possibly empty) list.
+      field.kind !== 'one2many' &&
+      field.kind !== 'many2many'
     ) {
       throw new InvalidExtensionError(
         `${where}: the new field '${key}' is required but has no default.`,

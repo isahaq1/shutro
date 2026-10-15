@@ -437,10 +437,12 @@ export async function recompute(host: ComputeHost): Promise<void> {
         for (const key of byKey.keys()) {
           const field = graph.field(model, key);
           if (field === undefined) continue;
-          if (field.rank < bestRank) {
-            bestRank = field.rank;
+          // Fields sharing a compute run together, so the group waits for its highest-ranked field's inputs.
+          const rank = Math.max(...sharing(internals, field).map((f) => f.rank));
+          if (rank < bestRank) {
+            bestRank = rank;
             best = [field];
-          } else if (field.rank === bestRank) best.push(field);
+          } else if (rank === bestRank) best.push(field);
         }
       }
       if (best.length === 0) break;
