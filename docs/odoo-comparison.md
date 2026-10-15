@@ -5,7 +5,7 @@ software. Shutro is a data layer only: Odoo is a complete application platform, 
 valuable (web client, views, reports, thousands of modules) is outside an ORM's scope. The comparison is about the
 ORM and the guarantees it gives application code.
 
-Evidence for every Shutro claim is in the repository: 582 tests against real PostgreSQL, an ERP demo (partner,
+Evidence for every Shutro claim is in the repository: 600+ tests against real PostgreSQL, an ERP demo (partner,
 product, sale, invoice) with no casts in its modules, CI benchmarks with query budgets, and the RFCs in
 [`docs/rfcs/`](rfcs/README.md).
 
@@ -28,6 +28,9 @@ product, sale, invoice) with no casts in its modules, CI benchmarks with query b
 | **Migrations** | Schema auto-updated at module upgrade; columns are never dropped; no plan to review. | Diff against the live catalog, reviewed migration files with checksums, destructive changes refused unless allowed, SQL defaults for literal defaults, module data-migration hooks in version order. |
 | **Errors** | `UserError` / `ValidationError` strings. | Typed errors (`AccessError`, `MissingRecordError`, `CurrencyMismatchError`, …), each with the problem and a hint. |
 | **Reports** | `read_group` with `lazy`, untyped `__count` keys, monetary sums across currencies unless grouped by currency. | `aggregate()` with typed rows, date buckets in the user's time zone, rules / field groups / company scope applied, per-currency `Money` totals. |
+| **Module data** | XML/CSV data files checked at install; every data record rewritten at each module update. | Typed `record()` / `override()` / `ref()`; every reference, field and override checked at `buildRegistry` (startup, CI); unchanged records skipped by checksum; `noupdate` records stay the users'. |
+| **Runtime security** | Groups, ACLs and rules edited in the UI; a broken rule domain fails when users hit it. | Roles, access, rules and permission grants edited at runtime on top of the reviewed code baseline; rule domains compiled when saved; changes audited and reloaded in every process through NOTIFY. |
+| **Feature parity, typed** | `related`, `_inherits`, `parent_path` / `child_of`, `company_dependent`, `search=`. | `related()` (stored or not, writable), `delegates`, `hierarchy` with `childOf` / `parentOf`, `companyDependent`, `search(operator, value)`: same capabilities, with kinds, paths and declarations checked at startup. |
 
 ## Where Odoo is ahead
 
@@ -37,16 +40,11 @@ Be clear about these before choosing:
   its API may still change, and it has no production history.
 - **Platform.** Views, the web client, QWeb reports, the mail / activity / chatter framework, cron and job queues,
   import / export UI, website and portal. Shutro provides the data layer for them (Kosh), not the features.
-- **Runtime-editable security.** Odoo administrators edit groups, ACLs and record rules from the UI, stored in the
-  database. In Shutro, roles, ACLs, rules and permissions are declared in module code (reviewed, versioned, typed).
-  *Who* has which role and which special grants is data your application stores and loads at login. ACL and rule
-  changes need a deployment.
 - **Lazy recompute on read.** Odoo recomputes a pending stored field when it is read. Shutro's field reads are
   synchronous, so after a write a dependent stored field is fresh after `await env.flush()` or a `load()`; reading it
   earlier throws instead of returning a stale value.
-- **Delegation inheritance (`_inherits`)** and **`related` fields** as one-liners: Shutro has extension and
-  computes, but no delegation yet.
-- **Non-stored computed fields in search** (`search=` methods) and `name_search` / `display_name` conventions.
+- **Smaller conveniences:** sorting on delegated / non-stored related fields, `name_search` / `display_name`
+  conventions, and x2many fields through delegation are not there yet.
 - **Multi-database per process.** Shutro is one registry per database.
 
 ## Choosing

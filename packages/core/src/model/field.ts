@@ -107,6 +107,8 @@ export interface FieldBase<K extends FieldKind, R, W, Fl extends FieldFlags> {
   readonly encrypted: boolean;
   /** One value per company (a `jsonb` map by company id); reads and writes see the current company's value. */
   readonly companyDependent: boolean;
+  /** How filters on this non-stored computed field translate to stored fields. */
+  readonly search: SearchFn | undefined;
   /** The column type of one value (`pgType` is `jsonb` for company-dependent fields). */
   readonly valueType: string;
   /** Phantom. Never present at runtime. */
@@ -139,7 +141,16 @@ export interface CommonOptions<V> {
    * value, falling back to `default`. Not required, stored, computed, translated or encrypted.
    */
   readonly companyDependent?: boolean;
+  /**
+   * Makes a non-stored computed field searchable (Odoo `search=`): returns the domain on stored fields that matches
+   * `operator` and `value` (`'eq'` for a plain value). Called while the search is compiled.
+   * @example search: (op, value) => (op === 'eq' && value === true ? { price: { gt: '100' } } : { price: { lte: '100' } })
+   */
+  readonly search?: SearchFn;
 }
+
+/** Translates a filter on a non-stored computed field into a domain on stored fields. */
+export type SearchFn = (operator: string, value: unknown) => Readonly<Record<string, unknown>>;
 
 /** Options of text-like fields. */
 export interface TextOptions extends CommonOptions<string> {
@@ -475,6 +486,7 @@ function assertDecimalDefault(value: unknown, kind: string): void {
 }
 
 interface Normalized {
+  readonly search: SearchFn | undefined;
   readonly companyDependent: boolean;
   readonly label: string | undefined;
   readonly help: string | undefined;
@@ -569,6 +581,14 @@ function normalize(options: LooseOptions, defaults: Defaults = {}): Normalized {
   }
   const computed = compute !== undefined;
   if (
+    options.search !== undefined &&
+    (!computed || options.store === true || typeof options.search !== 'function')
+  )
+    throw new InvalidFieldError(
+      '`search` applies to non-stored computed fields.',
+      'Stored fields are searched directly; give non-stored computes search(operator, value) => domain.',
+    );
+  if (
     options.companyDependent === true &&
     (options.required === true ||
       computed ||
@@ -605,6 +625,7 @@ function normalize(options: LooseOptions, defaults: Defaults = {}): Normalized {
     translate: options.translate ?? false,
     encrypted: options.encrypted ?? false,
     companyDependent: options.companyDependent ?? false,
+    search: options.search,
   };
 }
 
