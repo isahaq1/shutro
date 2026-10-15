@@ -1,5 +1,6 @@
 /**
- * Recordset runtime (RFC 0004): identity map per transaction, prefetch groups, batched loads, typed access.
+ * Recordset runtime (RFC 0004): identity map per transaction, prefetch groups, batched loads, typed access, and
+ * the entry points of writes (see writes.ts).
  */
 
 import { compile, sql } from '@shutro/sql';
@@ -16,6 +17,13 @@ import type { RegisteredModel, Registry } from '../registry/registry.js';
 import { targetOf } from '../registry/registry.js';
 import { compileDomain, compileOrder, scopingConditions } from './domain.js';
 import { junctionTable } from './relations.js';
+import {
+  createRecords,
+  flushDirty,
+  unlinkRecords,
+  type WriteHost,
+  writeRecords,
+} from './writes.js';
 
 const CHUNK = 1000;
 
@@ -277,6 +285,7 @@ async function fetchX2Many(
   const field = model.fields[key] as Field & { target: string; inverseField?: string };
   const target = loader.registry.get(field.target).model;
   const missing = parents.filter((id) => !valuesOf(cache, model.name, id)?.has(key));
+  if (missing.length > 0) await loader.internals.flush(target.name); // re-pointed children must be visible
   const wanted = [...sub.fields].filter((k) => k !== 'id' && target.columns[k] !== undefined);
   const children = new Map<number, number[]>();
   for (const id of missing) children.set(id, []);
@@ -343,11 +352,12 @@ async function loadInto(
     } else {
       const children = await fetchX2Many(loader, model, key, ids, sub);
       const target = loader.registry.get(field.target).model;
-      for (const [k, nested] of sub.relations)
+      for (const [k, nested] of sub.relations) {
         await loadInto(loader, target, children, {
           fields: new Set(),
           relations: new Map([[k, nested]]),
         });
+      }
     }
   }
 }
@@ -467,35 +477,36 @@ export class RecordSetImpl {
     if (this.#pending !== undefined && this.#ids === undefined) {
       const { parentModel, key, parents, own } = this.#pending;
       await fetchX2Many(loader, parentModel, key, parents, normalized);
-      const mine = own.flatMap(
-        (p) =>
-          (valuesOf(loader.internals.cache, parentModel.name, p)?.get(key) as
-            | number[]
-            | undefined) ?? [],
-      );
-      const all = parents.flatMap(
-        (p) =>
-          (valuesOf(loader.internals.cache, parentModel.name, p)?.get(key) as
-            | number[]
-            | undefined) ?? [],
-      );
-      const target = this.model;
-      for (const [k, nested] of normalized.relations)
-        await loadInto(loader, target, [...new Set(all)], {
+      const childrenOf = (p: number): number[] =>
+        (valuesOf(loader.internals.cache, parentModel.name, p)?.get(key) as number[] | undefined) ??
+        [];
+      const mine = own.flatMap(childrenOf);
+      const all = [...new Set(parents.flatMap(childrenOf))];
+      for (const [k, nested] of normalized.relations) {
+        await loadInto(loader, this.model, all, {
           fields: new Set(),
           relations: new Map([[k, nested]]),
         });
-      return new RecordSetImpl(
-        this.env,
-        this.registered,
-        mine,
-        { ids: [...new Set(all)] },
-        undefined,
-      );
+      }
+      return new RecordSetImpl(this.env, this.registered, mine, { ids: all }, undefined);
     }
     const group = this.#group?.ids ?? this.ids;
     await loadInto(loader, this.model, group, normalized);
     return new RecordSetImpl(this.env, this.registered, this.ids, this.#group, undefined);
+  }
+
+  #host(): WriteHost {
+    return writeHost(this.#loader);
+  }
+
+  /** Updates the records in the cache now; flushed at the next flush point. */
+  async write(values: Readonly<Record<string, unknown>>): Promise<void> {
+    await writeRecords(this.#host(), this.model, await this.resolveIds(), values);
+  }
+
+  /** Deletes the records now. */
+  async unlink(): Promise<void> {
+    await unlinkRecords(this.#host(), this.model, await this.resolveIds());
   }
 
   /** Ids of a pending x2many set, loading them if needed. */
@@ -532,24 +543,18 @@ export class RecordSetImpl {
       const target = this.#loader.registry.get(targetOf(field) ?? '');
       const children = values?.get(key) as number[] | undefined;
       const group = this.#group?.ids ?? [id];
-      if (children === undefined)
+      if (children === undefined) {
         return new RecordSetImpl(this.env, target, undefined, undefined, {
           parentModel: this.model,
           key,
           own: [id],
           parents: group,
         });
-      return new RecordSetImpl(
-        this.env,
-        target,
-        children,
-        {
-          ids: group.flatMap(
-            (p) => (valuesOf(cache, this.modelName, p)?.get(key) as number[] | undefined) ?? [],
-          ),
-        },
-        undefined,
+      }
+      const groupChildren = group.flatMap(
+        (p) => (valuesOf(cache, this.modelName, p)?.get(key) as number[] | undefined) ?? [],
       );
+      return new RecordSetImpl(this.env, target, children, { ids: groupChildren }, undefined);
     }
     if (values === undefined || !values.has(key)) {
       throw new FieldNotLoadedError(
@@ -578,12 +583,13 @@ export class RecordSetImpl {
       const currencyId = values.get((field as unknown as { currencyField: string }).currencyField);
       const currency =
         typeof currencyId === 'number' ? cache.currencies.get(currencyId) : undefined;
-      if (currency === undefined)
+      if (currency === undefined) {
         throw new FieldNotLoadedError(
           this.modelName,
           key,
           'The currency of this monetary field is not loaded; load the field through the ORM (search/load), which loads currencies with it.',
         );
+      }
       return Money.of(raw as DecimalJs, currency);
     }
     if (field.kind === 'quantity') {
@@ -625,20 +631,52 @@ function recordClass(model: AnyModel): typeof RecordSetImpl {
   return Ctor;
 }
 
+function writeHost(loader: Loader): WriteHost {
+  return {
+    internals: loader.internals,
+    fetch: (model, ids, fields) => fetchMissing(loader, model, ids, fields),
+    ensureValueObjects: (model, ids, fields) => ensureValueObjects(loader, model, ids, fields),
+    defaults: (model) => withSiblings(model, defaultKeys(model)),
+    values: (model, id, create) => valuesOf(loader.internals.cache, model, id, create),
+    children: async (model, id, key) => {
+      await fetchX2Many(loader, model, key, [id], {
+        fields: new Set(['id']),
+        relations: new Map(),
+      });
+      return [
+        ...((valuesOf(loader.internals.cache, model.name, id)?.get(key) as number[] | undefined) ??
+          []),
+      ];
+    },
+  };
+}
+
+/** @internal Flushes the unit of work (every model, or one). */
+export async function flushAll(internals: ScopeInternals, model?: string): Promise<void> {
+  const loader: Loader = { env: internals.env, internals, registry: internals.registry };
+  await flushDirty(writeHost(loader), model);
+}
+
 /** @internal `env.model(name)`. */
 export function modelRef(
   env: Env,
   name: string,
 ): {
   modelName: string;
+  create(rows: readonly Readonly<Record<string, unknown>>[]): Promise<RecordSetImpl>;
   search(query?: unknown): Promise<RecordSetImpl>;
   browse(ids: readonly number[]): RecordSetImpl;
 } {
   const internals = internalsOf(env);
   const registered = internals.registry.get(name);
   const model = registered.model;
+  const loader: Loader = { env, internals, registry: internals.registry };
   return {
     modelName: name,
+    async create(rows: readonly Readonly<Record<string, unknown>>[]): Promise<RecordSetImpl> {
+      const ids = await createRecords(writeHost(loader), model, rows);
+      return new RecordSetImpl(env, registered, ids, { ids }, undefined);
+    },
     async search(
       query: {
         where?: Record<string, unknown>;
@@ -647,6 +685,7 @@ export function modelRef(
         offset?: number;
       } = {},
     ): Promise<RecordSetImpl> {
+      await internals.flush(model.name); // the search must see pending writes
       const fields = withSiblings(model, defaultKeys(model));
       const wanted = [...fields].filter((k) => k !== 'id' && model.columns[k] !== undefined);
       const columns = sql.join([
@@ -664,7 +703,6 @@ export function modelRef(
         ),
       );
       const ids = rows.map((row) => hydrate(model, row, wanted, internals.cache));
-      const loader: Loader = { env, internals, registry: internals.registry };
       await ensureValueObjects(loader, model, ids, fields);
       return new RecordSetImpl(env, registered, ids, { ids }, undefined);
     },

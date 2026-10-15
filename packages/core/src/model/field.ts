@@ -210,12 +210,12 @@ export interface DecimalField<Fl extends FieldFlags>
 }
 /** `f.monetary` descriptor. */
 export interface MonetaryField<C extends string, Fl extends FieldFlags>
-  extends FieldBase<'monetary', Money, Decimal | string, Fl> {
+  extends FieldBase<'monetary', Money, Decimal | string | Money, Fl> {
   readonly currencyField: C;
 }
 /** `f.quantity` descriptor. */
 export interface QuantityField<U extends string, Fl extends FieldFlags>
-  extends FieldBase<'quantity', Quantity, Decimal | string, Fl> {
+  extends FieldBase<'quantity', Quantity, Decimal | string | Quantity, Fl> {
   readonly uomField: U;
   readonly scale: number | string | undefined;
 }

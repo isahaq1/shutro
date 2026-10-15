@@ -51,6 +51,7 @@ export {
   UndeclaredDependencyError,
   UnknownModelError,
   UomMismatchError,
+  ValidationError,
 } from './errors.js';
 export type { CreateOf, FlagsOfField, ReadOf, WriteOf } from './model/faces.js';
 export {
@@ -140,6 +141,7 @@ export { defineUom, Quantity, type Uom, type UomInput } from './money/quantity.j
 export type { RoundingMethod } from './money/rounding.js';
 export type {
   Access,
+  CreateValues,
   DefaultLoaded,
   Defaults,
   Domain,
@@ -163,6 +165,7 @@ export type {
   SearchQuery,
   Target,
   ToLoaded,
+  WriteValues,
 } from './recordset/types.js';
 export { createTableStatements } from './registry/ddl.js';
 export { defineModule, isModule, type Module, type ModuleDefinition } from './registry/module.js';

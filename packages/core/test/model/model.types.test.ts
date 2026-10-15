@@ -36,7 +36,7 @@ test('the model type carries the merged fields and names', () => {
   type C = CreateOf<typeof Order.fields>;
   expectTypeOf<C>().not.toHaveProperty('id');
   expectTypeOf<C>().not.toHaveProperty('createdAt');
-  expectTypeOf<C>().toHaveProperty('company'); // required, no default → mandatory
+  expectTypeOf<C['company']>().toEqualTypeOf<Id<'res.company'> | undefined>(); // required, but defaults to env.company
   expectTypeOf<C['active']>().toEqualTypeOf<boolean | undefined>();
 });
 

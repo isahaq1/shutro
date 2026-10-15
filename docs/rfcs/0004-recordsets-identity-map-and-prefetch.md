@@ -468,3 +468,24 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 7. **`bigint` fields read as safe numbers** (the driver guards overflow), matching ids.
 8. **Not yet:** writes (`create` / `write` / `unlink`, the unit of work, record-rule-enforcing flushes), non-stored computes
    on read, `stream()`, `exists()`, `sum()` on monetary fields, `withEnv`, and the full domain compiler.
+
+## Implementation notes (2026-10-15, recordsets: writes)
+
+`packages/core/src/recordset/writes.ts`. Where the implementation refines §7.6:
+
+1. **Creates are immediate** (Q3 resolved) as one `INSERT … SELECT FROM unnest($1::t1[], …) RETURNING id` per model: stable
+   text for any row count, one parameter per column, ids in input order (spike 0002 K7). Created records are cached in
+   full, so reading them costs nothing.
+2. **The flush groups dirty records by (model, sorted field set)** and emits `UPDATE … FROM unnest(…) AS v(id, …)`, with
+   `updated_at` / `updated_by_id` in the same statement and `RETURNING` to verify the row count.
+3. **Flush points:** before a `search()` on the model, before `env.sql`, before an x2many relation fetch of the target
+   model (re-pointed children), before savepoint release, and pre-commit. Reads of cached fields never need a flush.
+4. **Savepoint journal** (§7.6): value changes (with the previous dirty state), creations and deletions are undone in
+   reverse on rollback; on release the entries merge into the parent savepoint's journal.
+5. **x2many commands** run immediately: one2many through child creates / writes / unlinks (the inverse is set by the
+   ORM; `unlink` / `clear` / `set` need a nullable inverse), many2many through junction-table statements
+   (`ON CONFLICT DO NOTHING` on link). After a command the parent's cached child list is updated or invalidated.
+6. **Binding inside arrays:** `Date` values are bound as ISO strings and `json` as text, because postgres.js would
+   otherwise type the array parameter as a scalar and defeat the `::type[]` cast.
+7. **Record rules on flush (§7.6), computes, constraints and sequences** are not implemented yet; a required field with
+   a `sequence` must be given explicitly until the sequence package exists.
