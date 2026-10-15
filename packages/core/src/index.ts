@@ -6,6 +6,14 @@
  * Implemented so far: the value types (`Decimal`, `Money`, `Currency`, `Quantity`, `Uom`) and the environment &
  * transaction context (`createShutro`, `Env`).
  */
+
+export {
+  buildComputeGraph,
+  type ComputedField,
+  type ComputeGraph,
+  type PathStep,
+  type Trigger,
+} from './compute/graph.js';
 export {
   createShutro,
   Env,
@@ -20,6 +28,8 @@ export type { Identity, ResolvedIdentity } from './env/identity.js';
 export { assertTimeZone, calendarDateIn } from './env/time.js';
 export {
   CompanyNotAllowedError,
+  ComputeAssignmentError,
+  ComputeCycleError,
   ConcurrentUpdateError,
   CurrencyMismatchError,
   DivisionByZeroError,
@@ -46,6 +56,7 @@ export {
   NoEnvironmentError,
   NonIntegerNumberError,
   NoRegistryError,
+  RecomputeLimitError,
   ShutroError,
   type ShutroErrorCode,
   SingletonError,
@@ -147,6 +158,9 @@ export type { RoundingMethod } from './money/rounding.js';
 export { type JunctionTable, junctionTable } from './recordset/relations.js';
 export type {
   Access,
+  ComputedKeys,
+  ComputeRec,
+  ComputeSet,
   CreateValues,
   DefaultLoaded,
   Defaults,

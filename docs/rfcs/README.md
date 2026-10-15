@@ -14,6 +14,7 @@ An RFC is only implemented after it has been approved and its status set to **Ac
 | 0005 | [Query builder & SQL compiler](0005-query-builder-and-sql-compiler.md) | Accepted | 0001, 0002, 0003 |
 | 0006 | [Money, decimals & currency](0006-money-decimals-and-currency.md) | Accepted | 0001, 0003, 0004, 0005 |
 | 0007 | [PostgreSQL driver](0007-postgresql-driver.md) | Accepted | 0003, 0004, 0005, 0006 |
+| 0008 | [Compute engine](0008-compute-engine.md) | Accepted | 0001, 0002, 0004 |
 
 ## Lifecycle
 

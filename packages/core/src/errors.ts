@@ -32,7 +32,10 @@ export type ShutroErrorCode =
   | 'NO_REGISTRY'
   | 'VALIDATION'
   | 'INVALID_EXTENSION'
-  | 'EXTENSION_CONFLICT';
+  | 'EXTENSION_CONFLICT'
+  | 'COMPUTE_CYCLE'
+  | 'COMPUTE_ASSIGNMENT'
+  | 'RECOMPUTE_LIMIT';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -341,6 +344,39 @@ export class FlagNotAllowedError extends ShutroError {
       'FLAG_NOT_ALLOWED',
       `The flag '${flag}' can only be changed in a superuser environment.`,
       'Disable it inside env.asSuperuser({ reason }, (su) => su.withFlags({ ... })), and only for system tasks such as migrations.',
+    );
+  }
+}
+
+/** Computed fields depend on each other in a cycle (RFC 0008 §7.1). */
+export class ComputeCycleError extends ShutroError {
+  constructor(chain: readonly string[]) {
+    super(
+      'COMPUTE_CYCLE',
+      `Computed fields depend on each other in a cycle: ${chain.join(' → ')}.`,
+      'Break the cycle: one of these fields must be computed from stored data only, or become a method.',
+    );
+  }
+}
+
+/** A computed field was assigned outside its compute (RFC 0008 §7.5). */
+export class ComputeAssignmentError extends ShutroError {
+  constructor(model: string, key: string) {
+    super(
+      'COMPUTE_ASSIGNMENT',
+      `${model}.${key} is computed and can only be assigned inside its compute function.`,
+      'Write the fields it depends on instead, or give the field an inverse and use write().',
+    );
+  }
+}
+
+/** The recompute loop did not converge (RFC 0008 §7.3). */
+export class RecomputeLimitError extends ShutroError {
+  constructor(rounds: number, pending: readonly string[]) {
+    super(
+      'RECOMPUTE_LIMIT',
+      `Recompute did not settle after ${rounds} rounds; still pending: ${pending.join(', ')}.`,
+      'A compute is probably writing one of its own dependencies. Computes must only assign their computed fields.',
     );
   }
 }

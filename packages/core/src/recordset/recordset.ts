@@ -1,6 +1,6 @@
 /**
  * Recordset runtime (RFC 0004): identity map per transaction, prefetch groups, batched loads, typed access, and
- * the entry points of writes (see writes.ts).
+ * the entry points of writes (see writes.ts) and computes (see compute.ts).
  */
 
 import { compile, sql } from '@shutro/sql';
@@ -15,6 +15,13 @@ import { defineUom, Quantity, type Uom } from '../money/quantity.js';
 import type { RoundingMethod } from '../money/rounding.js';
 import type { RegisteredModel, Registry } from '../registry/registry.js';
 import { targetOf } from '../registry/registry.js';
+import {
+  assignComputed,
+  type ComputeHost,
+  type ComputeSpec,
+  computeFields,
+  recompute,
+} from './compute.js';
 import { compileDomain, compileOrder, scopingConditions } from './domain.js';
 import { junctionTable } from './relations.js';
 import {
@@ -66,12 +73,7 @@ function valuesOf(
 
 // ---------------------------------------------------------------------------------------------- load specs
 
-interface NormalizedSpec {
-  /** Scalar and many2one keys to fetch (plus `id`). */
-  readonly fields: ReadonlySet<string>;
-  /** Nested relations. */
-  readonly relations: ReadonlyMap<string, NormalizedSpec>;
-}
+type NormalizedSpec = ComputeSpec;
 
 function isX2Many(field: Field): boolean {
   return field.kind === 'one2many' || field.kind === 'many2many';
@@ -168,23 +170,23 @@ async function fetchMissing(
     const values = valuesOf(cache, model.name, id);
     return values === undefined || wanted.some((k) => !values.has(k));
   });
-  if (missing.length === 0 || wanted.length === 0) {
-    if (missing.length > 0) await assertExist(loader, model, missing);
-    return;
+  if (missing.length > 0 && wanted.length === 0) await assertExist(loader, model, missing);
+  if (missing.length > 0 && wanted.length > 0) {
+    const columns = sql.join([sql.id('id'), ...wanted.map((k) => sql.id(model.columns[k] ?? ''))]);
+    const seen = new Set<number>();
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const chunk = missing.slice(i, i + CHUNK);
+      const rows = await loader.internals.query<Record<string, unknown>>(
+        compile(
+          sql`SELECT ${columns} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${chunk})`,
+        ),
+      );
+      for (const row of rows) seen.add(hydrate(model, row, wanted, cache));
+    }
+    const absent = missing.filter((id) => !seen.has(id));
+    if (absent.length > 0) throw new MissingRecordError(model.name, absent);
   }
-  const columns = sql.join([sql.id('id'), ...wanted.map((k) => sql.id(model.columns[k] ?? ''))]);
-  const seen = new Set<number>();
-  for (let i = 0; i < missing.length; i += CHUNK) {
-    const chunk = missing.slice(i, i + CHUNK);
-    const rows = await loader.internals.query<Record<string, unknown>>(
-      compile(
-        sql`SELECT ${columns} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${chunk})`,
-      ),
-    );
-    for (const row of rows) seen.add(hydrate(model, row, wanted, cache));
-  }
-  const absent = missing.filter((id) => !seen.has(id));
-  if (absent.length > 0) throw new MissingRecordError(model.name, absent);
+  // Even when every column was cached, the value objects behind monetary / quantity fields may not be.
   await ensureValueObjects(loader, model, ids, fields);
 }
 
@@ -327,8 +329,34 @@ async function fetchX2Many(
     for (const child of (valuesOf(cache, model.name, id)?.get(key) as number[] | undefined) ?? [])
       all.push(child);
   const unique = [...new Set(all)];
-  await ensureValueObjects(loader, target, unique, sub.fields);
+  // Lists cached by x2many commands hold ids whose fields were never fetched: load the sub-spec for every child.
+  await fetchMissing(loader, target, unique, sub.fields);
+  await computeNonStored(loader, target, unique, sub.fields);
   return unique;
+}
+
+/** Computes the requested non-stored computed keys that are missing from the cache (RFC 0008 §7.4). */
+async function computeNonStored(
+  loader: Loader,
+  model: AnyModel,
+  ids: readonly number[],
+  keys: ReadonlySet<string>,
+): Promise<void> {
+  const graph = loader.registry.compute;
+  const fields = [...keys]
+    .filter((k) => {
+      const f = model.fields[k];
+      return f?.computed === true && !f.store;
+    })
+    .map((k) => graph.field(model.name, k))
+    .filter((f) => f !== undefined);
+  if (fields.length === 0) return;
+  const { cache } = loader.internals;
+  const missing = ids.filter((id) => {
+    const values = valuesOf(cache, model.name, id);
+    return values === undefined || fields.some((f) => !values.has(f.key));
+  });
+  await computeFields(computeHost(loader), model, missing, fields);
 }
 
 /** Loads `spec` for `ids` of `model`, recursively (RFC 0004 §7.1). */
@@ -339,7 +367,11 @@ async function loadInto(
   spec: NormalizedSpec,
 ): Promise<void> {
   if (ids.length === 0) return;
+  // Pending triggers first, so stored computes are fresh when they are read (RFC 0008 §7.3).
+  if (!loader.internals.compute.recomputing && loader.internals.hasPending())
+    await recompute(computeHost(loader));
   await fetchMissing(loader, model, ids, spec.fields);
+  await computeNonStored(loader, model, ids, spec.fields);
   for (const [key, sub] of spec.relations) {
     const field = model.fields[key] as Field & { target: string };
     if (field.kind === 'many2one') {
@@ -527,6 +559,11 @@ export class RecordSetImpl {
     return this.ids;
   }
 
+  /** @internal Assigns a computed field of a singleton from inside its compute (RFC 0008 §7.5). */
+  assign(key: string, value: unknown): void {
+    assignComputed(computeHost(this.#loader), this.model, this.id, key, value);
+  }
+
   /** @internal Reads field `key` of a singleton from the cache. */
   fieldValue(key: string): unknown {
     const id = this.ids[0];
@@ -557,11 +594,12 @@ export class RecordSetImpl {
       return new RecordSetImpl(this.env, target, children, { ids: groupChildren }, undefined);
     }
     if (values === undefined || !values.has(key)) {
-      throw new FieldNotLoadedError(
-        this.modelName,
-        key,
-        `Load it first: await records.load(['${key}'])${field.kind === 'many2one' ? ` or load({ ${key}: true }) for the related record` : ''}.`,
-      );
+      const hint = field.computed
+        ? field.store
+          ? `It is computed and pending recompute (or not loaded): await records.load(['${key}']) or env.flush() first.`
+          : `It is computed on load: await records.load(['${key}']).`
+        : `Load it first: await records.load(['${key}'])${field.kind === 'many2one' ? ` or load({ ${key}: true }) for the related record` : ''}.`;
+      throw new FieldNotLoadedError(this.modelName, key, hint);
     }
     const raw = values.get(key);
     if (field.kind === 'many2one') {
@@ -612,23 +650,50 @@ function plain(value: unknown, field: Field | undefined): unknown {
   return value;
 }
 
-/** One subclass per model with an accessor per field, created on first use. */
+/** One subclass per model with an accessor per field, created on first use. Computed fields get a setter. */
 function recordClass(model: AnyModel): typeof RecordSetImpl {
   let Ctor = prototypes.get(model);
   if (Ctor === undefined) {
     Ctor = class extends RecordSetImpl {};
-    for (const key of Object.keys(model.fields)) {
+    for (const [key, field] of Object.entries(model.fields)) {
       if (key === 'id') continue;
       Object.defineProperty(Ctor.prototype, key, {
         get(this: RecordSetImpl) {
           return this.fieldValue(key);
         },
+        ...(field.computed
+          ? {
+              set(this: RecordSetImpl, value: unknown) {
+                this.assign(key, value);
+              },
+            }
+          : {}),
         enumerable: true,
       });
     }
     prototypes.set(model, Ctor);
   }
   return Ctor;
+}
+
+function recordsetOf(loader: Loader, model: AnyModel, ids: readonly number[]): RecordSetImpl {
+  const Ctor = recordClass(model);
+  return new Ctor(
+    loader.env,
+    loader.registry.get(model.name),
+    [...ids],
+    { ids: [...ids] },
+    undefined,
+  );
+}
+
+function computeHost(loader: Loader): ComputeHost {
+  return {
+    internals: loader.internals,
+    load: (model, ids, spec) => loadInto(loader, model, ids, spec),
+    values: (model, id, create) => valuesOf(loader.internals.cache, model, id, create),
+    recordset: (model, ids) => recordsetOf(loader, model, ids),
+  };
 }
 
 function writeHost(loader: Loader): WriteHost {
@@ -648,12 +713,14 @@ function writeHost(loader: Loader): WriteHost {
           []),
       ];
     },
+    recordset: (model, ids) => recordsetOf(loader, model, ids),
   };
 }
 
-/** @internal Flushes the unit of work (every model, or one). */
+/** @internal Flushes the unit of work (every model, or one): pending computes first, then the dirty records. */
 export async function flushAll(internals: ScopeInternals, model?: string): Promise<void> {
   const loader: Loader = { env: internals.env, internals, registry: internals.registry };
+  await recompute(computeHost(loader));
   await flushDirty(writeHost(loader), model);
 }
 
@@ -685,7 +752,7 @@ export function modelRef(
         offset?: number;
       } = {},
     ): Promise<RecordSetImpl> {
-      await internals.flush(model.name); // the search must see pending writes
+      await internals.flush(model.name); // the search must see pending writes (and computes)
       const fields = withSiblings(model, defaultKeys(model));
       const wanted = [...fields].filter((k) => k !== 'id' && model.columns[k] !== undefined);
       const columns = sql.join([

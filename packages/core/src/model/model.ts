@@ -445,6 +445,9 @@ const MAX_IDENTIFIER = 63;
 
 const models = new WeakSet<object>();
 
+/** @internal The compute of the implicit `displayName`: the engine derives it from `recName` (RFC 0008 §7.1). */
+export const defaultDisplayName = (): undefined => undefined;
+
 /** True when `value` was produced by {@link defineModel}. */
 export function isModel(value: unknown): value is AnyModel {
   return typeof value === 'object' && value !== null && models.has(value);
@@ -582,7 +585,7 @@ export function defineModel<
     }),
     displayName:
       user['displayName'] ??
-      f.char({ required: true, label: 'Display Name', compute: () => undefined, copy: false }),
+      f.char({ required: true, label: 'Display Name', compute: defaultDisplayName, copy: false }),
   };
   if (definition.archivable === true)
     implicit['active'] = f.boolean({ default: true, label: 'Active' });

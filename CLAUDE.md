@@ -181,7 +181,7 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Type generation (`shutro generate`: per-module and application views, `--check`; paths and --watch pending)
 
 ### Phase 3 — ERP engine
-- [ ] Computed fields (stored / non-stored) + dependency graph
+- [x] Computed fields (stored / non-stored) + dependency graph (RFC 0008: triggers, rank-ordered batched recompute at flush points, non-stored on load, inverse)
 - [ ] Constraints & onchange
 - [ ] State machines
 - [ ] Multi-company & multi-currency

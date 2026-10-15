@@ -108,7 +108,7 @@ function columnOf(key: string, field: Field, column: string): ColumnSpec {
   return {
     name: column,
     type,
-    nullable: !field.required,
+    nullable: !field.required || field.computed, // stored computes are filled after insert (RFC 0008 §7.6)
     default: dbDefault,
     identity: false,
     backfill,
