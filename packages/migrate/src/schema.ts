@@ -44,6 +44,8 @@ export interface TableSpec {
   /** Check constraints by name. Expressions are compared by name only (PostgreSQL normalizes them). */
   readonly checks: Readonly<Record<string, string>>;
   readonly indexes: Readonly<Record<string, IndexSpec>>;
+  /** `PARTITION BY` of a partitioned table (RFC 0015 §7.2). Partitions themselves are not diffed. */
+  readonly partition?: { readonly by: 'range' | 'list' | 'hash'; readonly column: string };
 }
 
 /** A whole schema: tables by name, plus required extensions. */
@@ -230,11 +232,17 @@ export function desiredSchema(registry: Registry): Schema {
     tables[model.table] = {
       name: model.table,
       columns,
-      primaryKey: ['id'],
+      primaryKey:
+        model.partition === undefined ? ['id'] : ['id', model.columns[model.partition.key] ?? ''],
       foreignKeys,
       uniques,
       checks,
       indexes,
+      ...(model.partition === undefined
+        ? {}
+        : {
+            partition: { by: model.partition.by, column: model.columns[model.partition.key] ?? '' },
+          }),
     };
   }
 

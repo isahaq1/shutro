@@ -32,7 +32,12 @@ function typeName(field: Field, model: string, key: string): string {
 function columnDdl(model: AnyModel, key: string, field: Field, column: string): string {
   const parts = [ident(column)];
   if (key === 'id') {
-    parts.push('bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY');
+    // A partitioned table's primary key includes the partition key (RFC 0015 §7.2): declared at table level.
+    parts.push(
+      model.partition === undefined
+        ? 'bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY'
+        : 'bigint GENERATED ALWAYS AS IDENTITY',
+    );
     return parts.join(' ');
   }
   parts.push(typeName(field, model.name, key));
@@ -83,7 +88,13 @@ export function createTableStatements(registry: Registry): readonly CompiledSql[
         );
       }
     }
-    tables.push(`CREATE TABLE ${ident(model.table)} (${columns.join(', ')})`);
+    if (model.partition !== undefined) {
+      const keyColumn = model.columns[model.partition.key] ?? '';
+      columns.push(`PRIMARY KEY (${ident('id')}, ${ident(keyColumn)})`);
+      tables.push(
+        `CREATE TABLE ${ident(model.table)} (${columns.join(', ')}) PARTITION BY ${model.partition.by.toUpperCase()} (${ident(keyColumn)})`,
+      );
+    } else tables.push(`CREATE TABLE ${ident(model.table)} (${columns.join(', ')})`);
     // Declared SQL constraints (partial uniques are indexes and belong to the migrator).
     for (const c of model.sqlConstraints) {
       if (c.kind === 'unique' && c.where === undefined) {

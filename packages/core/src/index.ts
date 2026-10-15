@@ -202,6 +202,12 @@ export {
   transitionOf,
 } from './model/model.js';
 export {
+  type PartitionBound,
+  type PartitionSpec,
+  partitionStatements,
+  rangePartitions,
+} from './model/partition.js';
+export {
   type Currency,
   type CurrencyInput,
   defineCurrency,
@@ -257,6 +263,7 @@ export type {
   WriteValues,
   X2ManyKeys,
 } from './recordset/types.js';
+export { copyField } from './recordset/writes.js';
 export { createTableStatements } from './registry/ddl.js';
 export {
   type AnyExtension,

@@ -2,6 +2,7 @@ packages:
   - packages/*
   - examples/*
   - spikes/*
+  - benchmarks
 
 # Dependency install scripts are denied unless listed as true here (pnpm 11).
 # These come in through testcontainers (docker-modem/ssh2); all have pure-JS fallbacks.

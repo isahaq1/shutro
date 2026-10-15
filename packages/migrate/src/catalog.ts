@@ -37,7 +37,7 @@ export async function readLiveSchema(driver: Driver, schema = 'public'): Promise
   > = {};
   const tableRows = await driver.query<{ name: string }>(
     compile(
-      sql`SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ${schema} AND c.relkind = 'r' ORDER BY c.relname`,
+      sql`SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ${schema} AND c.relkind IN ('r', 'p') AND NOT c.relispartition ORDER BY c.relname`,
     ),
   );
   for (const { name } of tableRows) {
@@ -66,7 +66,7 @@ export async function readLiveSchema(driver: Driver, schema = 'public'): Promise
       JOIN pg_class c ON c.oid = a.attrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
       LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-      WHERE n.nspname = ${schema} AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+      WHERE n.nspname = ${schema} AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped
       ORDER BY c.relname, a.attnum`),
   );
   for (const row of columnRows) {

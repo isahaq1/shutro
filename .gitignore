@@ -6,3 +6,4 @@ dist/
 coverage/
 *.log
 spikes/*/gen/
+benchmarks/results.json

@@ -28,6 +28,7 @@ import {
   withDefaultLabel,
 } from './field.js';
 import type { Id } from './id.js';
+import type { PartitionSpec } from './partition.js';
 
 // ------------------------------------------------------------------------------------------------- field records
 
@@ -222,6 +223,8 @@ export interface ModelDefinition<
   readonly access?: AccessSpec;
   /** Record rules (RFC 0014 §7.3). */
   readonly rules?: Readonly<Record<string, RuleSpec>>;
+  /** Partition the table (RFC 0015 §7.2); the key joins the primary key and must be a required stored field. */
+  readonly partition?: PartitionSpec;
 }
 
 type ModelKeys<
@@ -411,6 +414,7 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly onchange: Readonly<Record<string, OnchangeFn>>;
   readonly access: AccessSpec;
   readonly rules: Readonly<Record<string, RuleSpec>>;
+  readonly partition: PartitionSpec | undefined;
   readonly methods: Ms;
   /** Keys of the fields the model declared itself (implicit fields excluded); extensions add to these. */
   readonly declaredFields: readonly string[];
@@ -493,6 +497,7 @@ export interface ModelDescription {
   readonly onchange: readonly string[];
   readonly access: AccessSpec;
   readonly rules: Readonly<Record<string, RuleSpec>>;
+  readonly partition: PartitionSpec | null;
 }
 
 // --------------------------------------------------------------------------------------------------- helpers
@@ -948,6 +953,38 @@ export function defineModel<
     });
   }
 
+  // --- partitioning (RFC 0015 §7.2)
+  const partition = definition.partition;
+  if (partition !== undefined) {
+    if (!['range', 'list', 'hash'].includes(partition.by))
+      fail(
+        name,
+        `partition.by ${JSON.stringify(partition.by)} is unknown.`,
+        "Use 'range', 'list' or 'hash'.",
+      );
+    const keyField = fields[partition.key];
+    if (keyField === undefined || columns[partition.key] === undefined || keyField.computed)
+      fail(
+        name,
+        `partition key '${partition.key}' is not a stored field.`,
+        'Partition on a stored field such as a date or the company.',
+      );
+    else if (!keyField.required)
+      fail(
+        name,
+        `partition key '${partition.key}' must be required.`,
+        'It is part of the primary key: give it required: true (and a default if needed).',
+      );
+    for (const c of sqlConstraints) {
+      if (c.kind === 'unique' && !c.fields.includes(partition.key))
+        fail(
+          name,
+          `unique constraint '${c.key}' does not include the partition key '${partition.key}'.`,
+          'PostgreSQL enforces uniqueness per partition only when the key is part of it: add the key to the constraint.',
+        );
+    }
+  }
+
   // --- access and record rules (RFC 0014)
   const access: AccessSpec = Object.freeze({ ...(definition.access ?? {}) });
   assertAccessSpec(access, `Model '${name}'`);
@@ -989,6 +1026,7 @@ export function defineModel<
     onchange: Object.freeze(onchange),
     access,
     rules: Object.freeze(rules),
+    partition: partition === undefined ? undefined : Object.freeze({ ...partition }),
     methods: Object.freeze(methods),
     declaredFields: Object.freeze(Object.keys(user)),
     definition: Object.freeze({ ...definition }) as unknown as ModelDefinition<
@@ -1126,5 +1164,6 @@ function describeModel(model: AnyModel): ModelDescription {
     onchange: Object.keys(model.onchange),
     access: model.access,
     rules: model.rules,
+    partition: model.partition ?? null,
   };
 }

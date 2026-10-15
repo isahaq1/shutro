@@ -167,6 +167,8 @@ export interface ScopeInternals {
   readonly uid: number;
   readonly now: Date;
   query<R extends Row>(query: DriverQuery): Promise<readonly R[]>;
+  /** `COPY ... FROM STDIN` on the scope's connection (RFC 0015 §7.1); returns the row count. */
+  copyIn(query: DriverQuery, lines: Iterable<string>): Promise<number>;
   /** Records an undo entry when a savepoint is active. */
   journal(entry: JournalEntry): void;
   markDirty(model: string, id: number, key: string): void;
@@ -593,6 +595,14 @@ function scopeInternals(
     query: async <R extends Row>(q: DriverQuery): Promise<readonly R[]> => {
       try {
         return await query<R>(q);
+      } catch (error) {
+        throw mapConstraintError(registry, error);
+      }
+    },
+    copyIn: async (q, lines) => {
+      root.queries++;
+      try {
+        return await scope.conn.copyIn(q, lines);
       } catch (error) {
         throw mapConstraintError(registry, error);
       }

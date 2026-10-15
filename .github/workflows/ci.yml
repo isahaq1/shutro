@@ -30,3 +30,25 @@ jobs:
       - run: node scripts/check-forbidden.ts
       - run: pnpm test
       - run: pnpm build
+
+  bench:
+    name: benchmarks (query budgets)
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Query budgets fail the job; timings are uploaded for trend tracking (not asserted: shared runners are noisy).
+      - run: pnpm bench
+        env:
+          BENCH_ORDERS: '5000'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: benchmarks/results.json
