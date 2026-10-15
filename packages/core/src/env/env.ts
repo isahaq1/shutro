@@ -305,7 +305,7 @@ export class Env<S = unknown> {
         ? new Set(identity.groups)
         : runtime.registry.security.closure(identity.groups);
     this.administrator =
-      runtime.registry !== undefined && runtime.registry.security.isAdministrator(this.groups);
+      runtime.registry?.security.isAdministrator(this.groups) === true;
     this.grants = new Set(identity.grants);
     this.keys = runtime.keys;
     this.tz = identity.tz;
