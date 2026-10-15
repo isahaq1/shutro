@@ -345,6 +345,10 @@ type DomainOperators<V> = {
   readonly isNull?: boolean;
   readonly like?: string;
   readonly ilike?: string;
+  /** Hierarchies: the records in the subtrees of these ids (`id`, or a many2one to a model with `hierarchy`). */
+  readonly childOf?: V | readonly V[];
+  /** Hierarchies: the ancestors of these ids, themselves included. */
+  readonly parentOf?: V | readonly V[];
 };
 type DomainValue<F> =
   WriteType<F> extends never ? unknown : WriteType<F> | DomainOperators<WriteType<F>>;

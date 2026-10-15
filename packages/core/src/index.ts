@@ -199,6 +199,7 @@ export {
   type FieldDescription,
   type FieldRules,
   type FieldsRecord,
+  type HierarchySpec,
   humanize,
   type ImplicitFields,
   type ImplicitFieldsBase,

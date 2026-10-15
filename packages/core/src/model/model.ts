@@ -188,6 +188,14 @@ export interface ConstraintSpec {
   readonly check: (records: never) => unknown;
   readonly message: string | ((failing: never) => string);
 }
+/** The `hierarchy` option of a model. */
+export interface HierarchySpec<K extends string = string> {
+  /** The many2one to the parent record (same model). */
+  readonly parent: K;
+  /** A readonly char field holding the materialized path (`'1/5/9/'`), maintained by the engine. */
+  readonly path: K;
+}
+
 /** The `backdate` option of a model. */
 export interface BackdateSpec<K extends string = string> {
   /** The document date (`date` or `datetime`). */
@@ -227,6 +235,11 @@ export interface ModelDefinition<
    * today (in the user's time zone) minus `graceDays` requires the feature permission `permission`.
    */
   readonly backdate?: BackdateSpec<ModelKeys<Fs, A, C>>;
+  /**
+   * A tree (categories, accounts, locations): `parent` is a many2one to this model, `path` a readonly char field the
+   * engine maintains (`'1/5/9/'`), so `childOf` / `parentOf` filters are prefix matches on an index.
+   */
+  readonly hierarchy?: HierarchySpec<ModelKeys<Fs, A, C>>;
   readonly indexes?: readonly IndexSpec<ModelKeys<Fs, A, C>>[];
   readonly sqlConstraints?: Readonly<
     Record<string, SqlUniqueConstraint<ModelKeys<Fs, A, C>> | SqlCheckConstraint>
@@ -424,6 +437,7 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly companyScoped: CompanyScope | undefined;
   readonly tracking: readonly (keyof Fs & string)[];
   readonly backdate: BackdateSpec<keyof Fs & string> | undefined;
+  readonly hierarchy: HierarchySpec<keyof Fs & string> | undefined;
   readonly indexes: readonly ResolvedIndex<keyof Fs & string>[];
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
@@ -795,6 +809,23 @@ export function defineModel<
     )
       fail(name, 'backdate.graceDays must be a non-negative integer.', 'Use 0 for "today only".');
   }
+  const hierarchy = definition.hierarchy;
+  if (hierarchy !== undefined) {
+    const parent = fields[hierarchy.parent] as { kind?: string; target?: string } | undefined;
+    if (parent?.kind !== 'many2one' || parent.target !== name)
+      fail(
+        name,
+        `hierarchy.parent '${hierarchy.parent}' is not a many2one to ${name}.`,
+        `Declare ${hierarchy.parent}: f.many2one('${name}', { ondelete: 'cascade' }).`,
+      );
+    const path = fields[hierarchy.path];
+    if (path?.kind !== 'char' || !path.readonly || path.computed)
+      fail(
+        name,
+        `hierarchy.path '${hierarchy.path}' must be a readonly char field.`,
+        `Declare ${hierarchy.path}: f.char({ readonly: true, index: true }); the engine fills it.`,
+      );
+  }
   const tracking = [...(definition.tracking ?? [])];
   for (const key of tracking)
     if (!has(key))
@@ -1052,6 +1083,7 @@ export function defineModel<
         : Object.freeze({ ...definition.companyScoped }),
     tracking: Object.freeze(tracking),
     backdate: backdate === undefined ? undefined : Object.freeze({ ...backdate }),
+    hierarchy: hierarchy === undefined ? undefined : Object.freeze({ ...hierarchy }),
     indexes: Object.freeze(indexes),
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),
