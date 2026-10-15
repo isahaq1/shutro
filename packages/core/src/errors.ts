@@ -29,7 +29,8 @@ export type ShutroErrorCode =
   | 'SINGLETON'
   | 'MISSING_RECORD'
   | 'INVALID_DOMAIN'
-  | 'NO_REGISTRY';
+  | 'NO_REGISTRY'
+  | 'VALIDATION';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -302,6 +303,18 @@ export class NoRegistryError extends ShutroError {
       'This Shutro instance has no registry, so there are no models.',
       'Pass registry: buildRegistry({ modules }) to createShutro().',
     );
+  }
+}
+
+/** Values rejected by `create()` / `write()`: missing required fields, unknown or readonly fields, wrong types (RFC 0001 §7.7). */
+export class ValidationError extends ShutroError {
+  readonly model: string;
+  /** The offending field keys. */
+  readonly fields: readonly string[];
+  constructor(model: string, fields: readonly string[], problem: string, hint: string) {
+    super('VALIDATION', `${model}: ${problem}`, hint);
+    this.model = model;
+    this.fields = Object.freeze([...fields]);
   }
 }
 

@@ -4,6 +4,7 @@
  * Cross-model checks (relation targets, `depends` paths, one2many inverses) belong to the registry (RFC 0002).
  */
 import { isSql, type SqlFragment } from '@shutro/sql';
+import type { Env } from '../env/env.js';
 import { InvalidModelError } from '../errors.js';
 import type { FlagsOfField } from './faces.js';
 import {
@@ -17,6 +18,7 @@ import {
   type ScalarField,
   withDefaultLabel,
 } from './field.js';
+import type { Id } from './id.js';
 
 // ------------------------------------------------------------------------------------------------- field records
 
@@ -88,7 +90,7 @@ export type CompanyField<R extends boolean> = Many2oneField<
     readonly: false;
     computed: false;
     inverse: false;
-    hasDefault: false;
+    hasDefault: true;
     sequence: false;
   }
 >;
@@ -580,6 +582,7 @@ export function defineModel<
       required: definition.companyScoped.required,
       label: 'Company',
       index: true,
+      default: (env: Env) => env.companyId as Id<'res.company'>,
     });
   }
   const fields: Record<string, Field> = { ...implicit };

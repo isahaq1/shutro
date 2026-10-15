@@ -15,7 +15,7 @@ import {
   NoRegistryError,
   TransactionScopeError,
 } from '../errors.js';
-import { createRecordCache, modelRef, type RecordCache } from '../recordset/recordset.js';
+import { createRecordCache, flushAll, modelRef, type RecordCache } from '../recordset/recordset.js';
 import type { ModelName, ModelRef } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
 import {
@@ -59,6 +59,26 @@ export interface ScopeStats {
   readonly queries: number;
 }
 
+/** An undo record for savepoint rollback (RFC 0004 §7.6). */
+export type JournalEntry =
+  | {
+      readonly kind: 'value';
+      readonly model: string;
+      readonly id: number;
+      readonly key: string;
+      readonly had: boolean;
+      readonly prev: unknown;
+      readonly wasDirty: boolean;
+    }
+  | { readonly kind: 'created'; readonly model: string; readonly id: number }
+  | {
+      readonly kind: 'deleted';
+      readonly model: string;
+      readonly id: number;
+      readonly values: Map<string, unknown>;
+      readonly dirty: Set<string> | undefined;
+    };
+
 /** A transaction or savepoint. */
 interface Scope {
   readonly root: RootScope;
@@ -68,6 +88,8 @@ interface Scope {
   env: Env;
   readonly afterCommit: Hook[];
   readonly onRollback: Hook[];
+  /** Cache changes made in this savepoint, for undo; `undefined` for the root transaction. */
+  readonly journal: JournalEntry[] | undefined;
 }
 
 interface RootScope {
@@ -78,6 +100,9 @@ interface RootScope {
   queries: number;
   /** Identity map and value-object caches (RFC 0004 §7.4), shared by the savepoints of this attempt. */
   readonly cache: RecordCache;
+  /** Unit of work: model → id → dirty field keys. */
+  readonly dirty: Map<string, Map<number, Set<string>>>;
+  readonly uid: number;
 }
 
 interface Runtime {
@@ -88,9 +113,24 @@ interface Runtime {
 
 /** @internal What the recordset runtime needs from an environment. */
 export interface ScopeInternals {
+  readonly env: Env;
   readonly registry: Registry;
   readonly cache: RecordCache;
+  readonly uid: number;
+  readonly now: Date;
   query<R extends Row>(query: DriverQuery): Promise<readonly R[]>;
+  /** Records an undo entry when a savepoint is active. */
+  journal(entry: JournalEntry): void;
+  markDirty(model: string, id: number, key: string): void;
+  isDirty(model: string, id: number, key: string): boolean;
+  dirtyFields(model: string, id: number): Set<string> | undefined;
+  dirtyModels(): string[];
+  /** Removes and returns the dirty map of a model. */
+  takeDirty(model: string): Map<number, Set<string>> | undefined;
+  /** Drops a record from the cache and the unit of work. */
+  forget(model: string, id: number): void;
+  cachedValues(model: string): Iterable<Map<string, unknown>>;
+  flush(model?: string): Promise<void>;
 }
 
 const internals = new WeakMap<object, () => ScopeInternals>();
@@ -168,12 +208,12 @@ export class Env<S = unknown> {
       this.#assertUsable();
       const registry = runtime.registry;
       if (registry === undefined) throw new NoRegistryError();
-      return { registry, cache: scope.root.cache, query: (q) => this.#query(q) };
+      return scopeInternals(this as unknown as Env, scope, registry, (q) => this.#query(q));
     });
     Object.freeze(this);
   }
 
-  /** An empty recordset of `name`: `search()` / `browse()` start here (RFC 0004). */
+  /** An empty recordset of `name`: `search()` / `browse()` / `create()` start here (RFC 0004). */
   model<M extends ModelName<S>>(name: M): ModelRef<S, M> {
     if (this.#runtime.registry === undefined) throw new NoRegistryError();
     this.#assertUsable();
@@ -196,6 +236,12 @@ export class Env<S = unknown> {
     return calendarDateIn(this.#scope.root.now, tz);
   }
 
+  /** Writes every pending change of the unit of work to the database now (RFC 0004 §7.6). */
+  async flush(): Promise<void> {
+    if (this.#runtime.registry === undefined) return;
+    await flushAll(internalsOf(this as unknown as Env));
+  }
+
   /** Statistics of the current attempt (query counts for N+1 assertions, RFC 0004 §7.9). */
   stats(): ScopeStats {
     return { queries: this.#scope.root.queries };
@@ -203,7 +249,8 @@ export class Env<S = unknown> {
 
   /**
    * Raw SQL in this transaction (RFC 0005 §7.8): values become parameters, identifiers go through `sql.id()`.
-   * Rejects with {@link TransactionScopeError} when the scope has ended or another scope is active.
+   * Pending writes are flushed first. Rejects with {@link TransactionScopeError} when the scope has ended or
+   * another scope is active.
    */
   sql<R extends Row = Row>(
     strings: TemplateStringsArray,
@@ -211,11 +258,15 @@ export class Env<S = unknown> {
   ): Promise<readonly R[]> {
     return (async () => {
       this.#assertUsable();
+      await this.flush();
       return this.#query<R>(compile(sqlTag(strings, ...values)));
     })();
   }
 
-  /** Runs `fn` in a savepoint: its work (and its hooks) are discarded if it throws, kept otherwise. */
+  /**
+   * Runs `fn` in a savepoint: its database work and its cache changes are undone if it throws, kept otherwise.
+   * Pending writes are flushed before the savepoint is released.
+   */
   async transaction<T>(fn: (env: Env<S>) => Promise<T>): Promise<T> {
     this.#assertUsable();
     const parent = this.#scope;
@@ -231,21 +282,29 @@ export class Env<S = unknown> {
           env: this as unknown as Env,
           afterCommit: [],
           onRollback: [],
+          journal: [],
         };
         scope.env = this.#derive({}, scope) as unknown as Env;
         child = scope;
         root.top = scope;
-        return this.#runtime.als.run(scope, () => fn(scope.env as Env<S>));
+        return this.#runtime.als.run(scope, async () => {
+          const value = await fn(scope.env as Env<S>);
+          await scope.env.flush();
+          return value;
+        });
       });
       if (child !== undefined) {
         child.status = 'committed';
         parent.afterCommit.push(...child.afterCommit);
         parent.onRollback.push(...child.onRollback);
+        if (parent.journal !== undefined && child.journal !== undefined)
+          parent.journal.push(...child.journal);
       }
       return result;
     } catch (error) {
       if (child !== undefined) {
         child.status = 'rolled-back';
+        if (child.journal !== undefined) undo(child.journal, root);
         await runHooks(child.onRollback, this.#runtime, 'onRollback');
       }
       throw error;
@@ -357,6 +416,117 @@ export class Env<S = unknown> {
   }
 }
 
+function scopeInternals(
+  env: Env,
+  scope: Scope,
+  registry: Registry,
+  query: <R extends Row>(q: DriverQuery) => Promise<readonly R[]>,
+): ScopeInternals {
+  const root = scope.root;
+  const dirtyOf = (model: string, id: number): Set<string> | undefined =>
+    root.dirty.get(model)?.get(id);
+  return {
+    env,
+    registry,
+    cache: root.cache,
+    uid: root.uid,
+    now: root.now,
+    query,
+    journal(entry) {
+      root.top.journal?.push(entry);
+    },
+    markDirty(model, id, key) {
+      let byId = root.dirty.get(model);
+      if (byId === undefined) {
+        byId = new Map();
+        root.dirty.set(model, byId);
+      }
+      let fields = byId.get(id);
+      if (fields === undefined) {
+        fields = new Set();
+        byId.set(id, fields);
+      }
+      fields.add(key);
+    },
+    isDirty: (model, id, key) => dirtyOf(model, id)?.has(key) ?? false,
+    dirtyFields: (model, id) => {
+      const fields = dirtyOf(model, id);
+      return fields === undefined ? undefined : new Set(fields);
+    },
+    dirtyModels: () => [...root.dirty.keys()],
+    takeDirty(model) {
+      const byId = root.dirty.get(model);
+      root.dirty.delete(model);
+      return byId;
+    },
+    forget(model, id) {
+      root.cache.records.get(model)?.delete(id);
+      root.dirty.get(model)?.delete(id);
+    },
+    cachedValues: (model) => root.cache.records.get(model)?.values() ?? [],
+    flush: (model) => flushAll(internalsOf(env), model),
+  };
+}
+
+/** Reverts a rolled-back savepoint's cache changes, newest first. */
+function undo(journal: readonly JournalEntry[], root: RootScope): void {
+  const valuesOf = (model: string, id: number): Map<string, unknown> => {
+    let byId = root.cache.records.get(model);
+    if (byId === undefined) {
+      byId = new Map();
+      root.cache.records.set(model, byId);
+    }
+    let values = byId.get(id);
+    if (values === undefined) {
+      values = new Map();
+      byId.set(id, values);
+    }
+    return values;
+  };
+  const setDirty = (model: string, id: number, key: string, dirty: boolean): void => {
+    const byId = root.dirty.get(model);
+    if (dirty) {
+      if (byId === undefined) root.dirty.set(model, new Map([[id, new Set([key])]]));
+      else {
+        const fields = byId.get(id);
+        if (fields === undefined) byId.set(id, new Set([key]));
+        else fields.add(key);
+      }
+    } else {
+      byId?.get(id)?.delete(key);
+      if (byId?.get(id)?.size === 0) byId.delete(id);
+    }
+  };
+  for (let i = journal.length - 1; i >= 0; i--) {
+    const entry = journal[i];
+    if (entry === undefined) continue;
+    switch (entry.kind) {
+      case 'value': {
+        const values = valuesOf(entry.model, entry.id);
+        if (entry.had) values.set(entry.key, entry.prev);
+        else values.delete(entry.key);
+        setDirty(entry.model, entry.id, entry.key, entry.wasDirty);
+        break;
+      }
+      case 'created':
+        root.cache.records.get(entry.model)?.delete(entry.id);
+        root.dirty.get(entry.model)?.delete(entry.id);
+        break;
+      case 'deleted': {
+        const byId = root.cache.records.get(entry.model) ?? new Map<number, Map<string, unknown>>();
+        root.cache.records.set(entry.model, byId);
+        byId.set(entry.id, new Map(entry.values));
+        if (entry.dirty !== undefined && entry.dirty.size > 0) {
+          const dirtyById = root.dirty.get(entry.model) ?? new Map<number, Set<string>>();
+          root.dirty.set(entry.model, dirtyById);
+          dirtyById.set(entry.id, new Set(entry.dirty));
+        }
+        break;
+      }
+    }
+  }
+}
+
 /** Options of {@link createShutro}. */
 export interface ShutroOptions<S> {
   readonly driver: Driver;
@@ -379,9 +549,10 @@ export interface ShutroOptions<S> {
 export interface Shutro<S = unknown> {
   /**
    * Runs `fn` in one transaction with the given identity (RFC 0003 §7.1): `REPEATABLE READ`, identity pushed as
-   * `SET LOCAL` settings (`shutro.user_id`, `shutro.company_ids`), `TimeZone = UTC`. Commits when `fn` resolves,
-   * rolls back when it throws. Serialization failures and deadlocks re-run `fn` from scratch with a fresh scope
-   * (so `fn` must have no side effects outside the database; use `env.afterCommit`).
+   * `SET LOCAL` settings (`shutro.user_id`, `shutro.company_ids`), `TimeZone = UTC`. Pending writes are flushed
+   * before commit. Commits when `fn` resolves, rolls back when it throws. Serialization failures and deadlocks
+   * re-run `fn` from scratch with a fresh scope (so `fn` must have no side effects outside the database; use
+   * `env.afterCommit`).
    *
    * @throws {InvalidIdentityError} before any transaction starts.
    * @throws {ConcurrentUpdateError} when every attempt conflicted.
@@ -437,6 +608,8 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 now: row?.now ?? new Date(),
                 queries: 0,
                 cache: createRecordCache(),
+                dirty: new Map(),
+                uid: identity.uid,
               };
               const s: Scope = {
                 root,
@@ -446,6 +619,7 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 env: undefined as unknown as Env,
                 afterCommit: [],
                 onRollback: [],
+                journal: undefined,
               };
               root.top = s;
               s.env = new Env<unknown>(
@@ -459,7 +633,11 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 runtime,
               );
               scope = s;
-              return runtime.als.run(s, () => fn(s.env as Env<S>));
+              return runtime.als.run(s, async () => {
+                const value = await fn(s.env as Env<S>);
+                await s.env.flush(); // pre-commit: the unit of work reaches the database
+                return value;
+              });
             },
           );
           if (scope !== undefined) {

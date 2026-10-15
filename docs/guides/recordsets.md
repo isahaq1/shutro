@@ -100,3 +100,52 @@ expect(env.stats().queries - before).toBe(2);
 
 Until `@shutro/migrate` exists, `createTableStatements(registry)` returns `CREATE TABLE` / foreign-key / junction
 statements derived from the models, to be executed in order on a fresh database.
+
+# Recordsets (writing)
+
+```ts
+const orders = await env.model('sale.order').create([
+  {
+    name: 'SO100', partner: partnerId, currency: bdtId, dateOrder: new Date(),
+    lines: { create: [{ name: 'Laptop', currency: bdtId, uom: unitId, quantity: '2', priceUnit: '700', subtotal: '1400' }] },
+    tags: { link: [vipId] },
+  },
+]);                                   // one INSERT per model; the records come back with their defaults loaded
+
+await orders.write({ note: 'bulk', amountTotal: Money.of('10', orders.first().amountTotal.currency) });
+await orders.first().lines.load().then((lines) => lines.unlink());
+```
+
+## `create()`
+
+- Values follow the model's **create face**: required fields without a default are mandatory; readonly, computed and
+  state fields are rejected (`ValidationError`, with the offending `fields`); the implicit `company` defaults to
+  `env.companyId`; `createdAt` / `updatedAt` / `createdBy` / `updatedBy` are set by the ORM.
+- One `INSERT … SELECT FROM unnest(...)` per model whatever the row count (ids come back in input order).
+- x2many fields take **commands**: `create`, `update: [{ id, values }]`, `delete`, `link`, `unlink`, `set`, `clear`.
+  Nested creates fill in the inverse field; many2many links are written to the junction table at once.
+- `Money` and `Quantity` values are accepted and checked against the record's currency / unit
+  (`CurrencyMismatchError`, `UomMismatchError`).
+
+## `write()` and the unit of work
+
+`write()` changes the cache immediately (reads see the new values with no query) and marks the records dirty. The
+database is updated at the next **flush point**: a `search()` on that model, raw SQL through `env.sql`, the end of a
+savepoint, or commit. A flush issues one `UPDATE … FROM unnest(...)` per (model, set of changed fields), so writing a
+field on 10,000 records is one statement. `updatedAt` / `updatedBy` are set on every flushed record.
+
+## `unlink()`
+
+Deletes immediately (`ON DELETE` rules of the schema apply) and drops the records from the cache.
+
+## Savepoints
+
+Inside `env.transaction(fn)`, every cache change is journaled. If `fn` throws, the database rolls back to the savepoint
+**and** the cache is restored: written values revert, records created inside disappear, records deleted inside
+come back, and nothing dirty is left behind. If `fn` succeeds, pending writes are flushed before the savepoint is
+released.
+
+## Not yet
+
+Computed-field recomputation, constraints, onchange, record rules on flush, sequences (a required `sequence` field
+currently has to be given explicitly), and `write()` on pending x2many sets.

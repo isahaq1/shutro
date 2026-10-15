@@ -6,7 +6,7 @@
  * (spike 0001, lesson 2).
  */
 import type { Env } from '../env/env.js';
-import type { FlagsOfField, ReadValue, WriteType } from '../model/faces.js';
+import type { CreateOf, FlagsOfField, ReadValue, WriteOf, WriteType } from '../model/faces.js';
 import type { Id } from '../model/id.js';
 import type { MoneyJson } from '../money/money.js';
 
@@ -198,6 +198,10 @@ export interface RecordSet<S, M extends ModelName<S>, L> {
   filter(fn: (record: Rec<S, M, L>, index: number) => boolean): RecordSet<S, M, L>;
   /** The values of a loaded scalar field, in order. */
   mapped<K extends ScalarKeys<S, M> & SOf<L>>(key: K): ReadValue<FieldsOf<S, M>[K]>[];
+  /** Updates the records in the cache now; the database is updated at the next flush point (search, raw SQL, savepoint end, commit). */
+  write(values: WriteValues<S, M>): Promise<void>;
+  /** Deletes the records now (`ON DELETE` rules apply). */
+  unlink(): Promise<void>;
   /** Plain JSON rows (ids for relations, `Money` / `Quantity` as objects, dates as ISO strings). */
   read<const K extends readonly LoadedKeys<L>[]>(keys: K): PlainRow<S, M, K[number]>[];
   toJSON(): readonly Id<M>[];
@@ -240,9 +244,16 @@ export interface SearchQuery<S, M extends ModelName<S>> {
   readonly offset?: number;
 }
 
+/** Values accepted by `create()`: the create face of the model's fields (x2many fields take commands). */
+export type CreateValues<S, M extends ModelName<S>> = CreateOf<FieldsOf<S, M>>;
+/** Values accepted by `write()`. */
+export type WriteValues<S, M extends ModelName<S>> = WriteOf<FieldsOf<S, M>>;
+
 /** `env.model(name)`: the entry point for a model. */
 export interface ModelRef<S, M extends ModelName<S>> {
   readonly modelName: M;
+  /** Inserts records (one statement per model) and returns them with their defaults loaded (RFC 0004 §7.6). */
+  create(values: readonly CreateValues<S, M>[]): Promise<RecordSet<S, M, DefaultLoaded<S, M>>>;
   search(query?: SearchQuery<S, M>): Promise<RecordSet<S, M, DefaultLoaded<S, M>>>;
   /** A lazy recordset of these ids. Nothing is fetched until `load()`. */
   browse(ids: readonly number[]): PendingSet<S, M>;
