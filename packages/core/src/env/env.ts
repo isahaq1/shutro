@@ -137,6 +137,8 @@ interface Runtime {
   readonly als: AsyncLocalStorage<Scope>;
   readonly onHookError: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
   readonly registry: Registry | undefined;
+  /** The language translations fall back to (RFC 0011). */
+  readonly sourceLang: string;
 }
 
 /** @internal What the recordset runtime needs from an environment. */
@@ -158,6 +160,7 @@ export interface ScopeInternals {
   /** Drops a record from the cache and the unit of work. */
   forget(model: string, id: number): void;
   cachedValues(model: string): Iterable<Map<string, unknown>>;
+  readonly sourceLang: string;
   flush(model?: string): Promise<void>;
   /** Records that `(model, key)` changed for `ids` and invalidates cached dependents (RFC 0008 §7.2). */
   trigger(model: string, key: string, ids: readonly number[]): void;
@@ -209,6 +212,8 @@ export class Env<S = unknown> {
   /** Allowed company ids (record-rule scope). */
   readonly companyIds: readonly number[];
   readonly lang: string;
+  /** The language translatable fields fall back to when `lang` has no text (RFC 0011). */
+  readonly sourceLang: string;
   readonly tz: string;
   /** Superuser mode: only inside {@link asSuperuser}. */
   readonly su: boolean;
@@ -236,6 +241,7 @@ export class Env<S = unknown> {
     this.companyId = identity.companyId;
     this.companyIds = identity.companyIds;
     this.lang = identity.lang;
+    this.sourceLang = runtime.sourceLang;
     this.tz = identity.tz;
     this.su = identity.su;
     this.reason = identity.reason;
@@ -541,6 +547,7 @@ function scopeInternals(
         for (const set of sets.get(model)?.values() ?? []) set.delete(id);
     },
     cachedValues: (model) => root.cache.records.get(model)?.values() ?? [],
+    sourceLang: env.sourceLang,
     flush: (model) => flushAll(internalsOf(env), model),
     trigger(model, key, ids) {
       if (ids.length === 0) return;
@@ -637,6 +644,8 @@ export interface ShutroOptions<S> {
   readonly driver: Driver;
   /** The registry built from the application's modules. Without it, `env.model()` is unavailable. */
   readonly registry?: Registry<S>;
+  /** The source language of translatable fields: what readers of a language without text see. Default `en_US`. */
+  readonly sourceLang?: string;
   /** Retry policy for serialization failures and deadlocks. Default: 5 attempts with jittered exponential backoff. */
   readonly retry?: {
     readonly attempts?: number;
@@ -685,6 +694,7 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
     als: new AsyncLocalStorage<Scope>(),
     onHookError: options.onHookError ?? defaultHookError,
     registry: options.registry as Registry | undefined,
+    sourceLang: assertLang(options.sourceLang ?? 'en_US'),
   };
   const NOW = compile(sqlTag`SELECT now() AS now`);
 

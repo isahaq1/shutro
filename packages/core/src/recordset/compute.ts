@@ -274,7 +274,10 @@ export function assignComputed(
     throw new ComputeAssignmentError(model.name, key);
   const field = model.fields[key] as Field;
   const values = host.values(model.name, id, true) as Map<string, unknown>;
-  const normalized = normalize(model, key, field, value, (k) => values.get(k));
+  const normalized = normalize(model, key, field, value, (k) => values.get(k), {
+    lang: internals.env.lang,
+    source: internals.sourceLang,
+  });
   internals.journal({
     kind: 'value',
     model: model.name,

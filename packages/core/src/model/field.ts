@@ -2,6 +2,7 @@
  * Field builders (`f.*`) and descriptors, RFC 0001 §7.3. A descriptor is frozen runtime metadata (what Kosh and
  * the migrator read) plus phantom types that carry the field's read / create / write faces.
  */
+import type { Translations } from '@shutro/i18n';
 import type { Env } from '../env/env.js';
 import { InvalidFieldError, ShutroError } from '../errors.js';
 import type { Decimal } from '../money/decimal.js';
@@ -211,8 +212,11 @@ export interface Many2manyOptions<T extends string> extends X2ManyOptions<T> {
 /** The descriptor of a field whose faces are plain values. */
 export interface ScalarField<K extends FieldKind, R, W, Fl extends FieldFlags>
   extends FieldBase<K, R, W, Fl> {}
+/** The write type of a text field: a map of translations too when `translate: true` (RFC 0011). */
+export type TextWrite<O> = O extends { readonly translate: true } ? string | Translations : string;
 /** `f.char` descriptor. */
-export interface CharField<Fl extends FieldFlags> extends FieldBase<'char', string, string, Fl> {
+export interface CharField<Fl extends FieldFlags, W extends string | Translations = string>
+  extends FieldBase<'char', string, W, Fl> {
   readonly size: number | undefined;
 }
 /** `f.float` descriptor. */
@@ -547,21 +551,21 @@ export const f = {
   /** Short text. `size` gives `varchar(size)`, otherwise `text`. */
   char<const O extends CharOpts = NoOptions>(
     options?: O & Exact<O, CharOpts> & ComputeRules<O>,
-  ): CharField<FlagsOf<O>> {
+  ): CharField<FlagsOf<O>, TextWrite<O>> {
     const opts: CharOpts = options ?? {};
     if (opts.size !== undefined) assertPositiveInt(opts.size, 'size');
     const base = textLike('char', opts, opts.size === undefined ? 'text' : `varchar(${opts.size})`);
-    return make({ ...base, size: opts.size }) as CharField<FlagsOf<O>>;
+    return make({ ...base, size: opts.size }) as CharField<FlagsOf<O>, TextWrite<O>>;
   },
 
   /** Long text. */
   text<const O extends TextOptions = NoOptions>(
     options?: O & Exact<O, TextOptions> & ComputeRules<O>,
-  ): ScalarField<'text', string, string, FlagsOf<O>> {
+  ): ScalarField<'text', string, TextWrite<O>, FlagsOf<O>> {
     return textLike('text', options ?? {}, 'text') as ScalarField<
       'text',
       string,
-      string,
+      TextWrite<O>,
       FlagsOf<O>
     >;
   },
@@ -569,13 +573,13 @@ export const f = {
   /** HTML, sanitized on write unless `sanitize: false`. */
   html<const O extends HtmlOptions = NoOptions>(
     options?: O & Exact<O, HtmlOptions> & ComputeRules<O>,
-  ): ScalarField<'html', string, string, FlagsOf<O>> & { readonly sanitize: boolean } {
+  ): ScalarField<'html', string, TextWrite<O>, FlagsOf<O>> & { readonly sanitize: boolean } {
     const opts: HtmlOptions = options ?? {};
     const base = textLike('html', opts, 'text');
     return make({ ...base, sanitize: opts.sanitize ?? true }) as ScalarField<
       'html',
       string,
-      string,
+      TextWrite<O>,
       FlagsOf<O>
     > & { readonly sanitize: boolean };
   },

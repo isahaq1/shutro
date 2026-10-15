@@ -21,6 +21,7 @@ import type {
   ScalarField,
   SelectionField,
   StateField,
+  TextWrite,
   Transition,
 } from './field.js';
 
@@ -34,11 +35,11 @@ type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) exten
 /** The implicit `id` of model `M`. */
 export type Id<M extends string> = IdField<M>;
 /** `f.char`. */
-export type Char<O = NoOptions> = CharField<FlagsOf<O>>;
+export type Char<O = NoOptions> = CharField<FlagsOf<O>, TextWrite<O>>;
 /** `f.text`. */
-export type Text<O = NoOptions> = ScalarField<'text', string, string, FlagsOf<O>>;
+export type Text<O = NoOptions> = ScalarField<'text', string, TextWrite<O>, FlagsOf<O>>;
 /** `f.html`. */
-export type Html<O = NoOptions> = ScalarField<'html', string, string, FlagsOf<O>> & {
+export type Html<O = NoOptions> = ScalarField<'html', string, TextWrite<O>, FlagsOf<O>> & {
   readonly sanitize: boolean;
 };
 /** `f.boolean` (always required, always defaulted). */

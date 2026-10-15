@@ -11,7 +11,18 @@ import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { targetOf } from '../registry/registry.js';
 import { junctionTable } from './relations.js';
-import { arrayType, bindValue, fail, normalize } from './values.js';
+import {
+  arrayType,
+  bindValue,
+  fail,
+  normalize,
+  type TranslationContext,
+  valueRef,
+} from './values.js';
+
+function translationOf(internals: ScopeInternals): TranslationContext {
+  return { lang: internals.env.lang, source: internals.sourceLang };
+}
 
 const CHUNK = 1000;
 
@@ -129,7 +140,7 @@ function splitRow(
         `field '${key}' is not stored.`,
         'Non-stored computed fields cannot be written.',
       );
-    stored.set(key, normalize(model, key, field, value, siblings));
+    stored.set(key, normalize(model, key, field, value, siblings, translationOf(host.internals)));
   }
   return { stored, commands };
 }
@@ -162,7 +173,9 @@ export async function createRecords(
       if (value === null && field.required && !field.computed) missing.push(key);
       stored.set(
         key,
-        value === null ? null : normalize(model, key, field, value, (k) => stored.get(k)),
+        value === null
+          ? null
+          : normalize(model, key, field, value, (k) => stored.get(k), translationOf(internals)),
       );
     }
     if (missing.length > 0)
@@ -186,7 +199,7 @@ export async function createRecords(
     );
     const rowsOut = await internals.query<{ id: number }>(
       compile(
-        sql`INSERT INTO ${sql.id(model.table)} (${sql.join(columns.map((k) => sql.id(model.columns[k] ?? '')))}) SELECT * FROM unnest(${sql.join(arrays)}) RETURNING ${sql.id('id')}`,
+        sql`INSERT INTO ${sql.id(model.table)} (${sql.join(columns.map((k) => sql.id(model.columns[k] ?? '')))}) SELECT ${sql.join(columns.map((k) => valueRef(model.fields[k] as Field, model.columns[k] ?? '')))} FROM unnest(${sql.join(arrays)}) AS ${sql.id('v')}(${sql.join(columns.map((k) => sql.id(model.columns[k] ?? '')))}) RETURNING ${sql.id('id')}`,
       ),
     );
     if (rowsOut.length !== chunk.length) throw new MissingRecordError(model.name, []);
@@ -589,7 +602,7 @@ export async function flushDirty(host: WriteHost, modelName?: string): Promise<v
         ];
         const names = [sql.id('id'), ...fields.map((f) => sql.id(f.column))];
         const sets = [
-          ...fields.map((f) => sql`${sql.id(f.column)} = ${sql.id('v', f.column)}`),
+          ...fields.map((f) => sql`${sql.id(f.column)} = ${valueRef(f.field, f.column)}`),
           sql`${sql.id('updated_at')} = ${internals.now}`,
           sql`${sql.id('updated_by_id')} = ${internals.uid}`,
         ];

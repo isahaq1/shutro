@@ -25,7 +25,8 @@
   "dependencies": {
     "@shutro/driver-pg": "workspace:*",
     "@shutro/sql": "workspace:*",
-    "decimal.js": "^10.6.0"
+    "decimal.js": "^10.6.0",
+    "@shutro/i18n": "workspace:*"
   },
   "devDependencies": {
     "@shutro/testing": "workspace:*",

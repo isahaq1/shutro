@@ -30,9 +30,16 @@ function bind(value: unknown): unknown {
   return value;
 }
 
+/** The environment language and the source language (RFC 0011). */
+export interface TranslationScope {
+  readonly lang: string;
+  readonly source: string;
+}
+
 function column(
   model: AnyModel,
   key: string,
+  translation?: TranslationScope,
 ): { readonly field: Field; readonly column: SqlFragment } {
   const field = model.fields[key];
   const col = model.columns[key];
@@ -47,6 +54,13 @@ function column(
       `'${key}' of ${model.name} is a ${field.kind} field and cannot be filtered on directly.`,
       'Filter x2many relations with any / all / none (full domain compiler), and non-stored computes in memory.',
     );
+  }
+  if (field.translate && translation !== undefined) {
+    // COALESCE(col->>lang, col->>source): what readers see, so filters and sorts match reads (RFC 0005 §7.4).
+    return {
+      field,
+      column: sql`COALESCE(${sql.id(col)}->>${translation.lang}, ${sql.id(col)}->>${translation.source})`,
+    };
   }
   return { field, column: sql.id(col) };
 }
@@ -112,11 +126,12 @@ function isOperators(value: unknown): value is Readonly<Record<string, unknown>>
 export function compileDomain(
   model: AnyModel,
   where: Readonly<Record<string, unknown>> | undefined,
+  translation?: TranslationScope,
 ): SqlFragment[] {
   const conditions: SqlFragment[] = [];
   for (const [key, value] of Object.entries(where ?? {})) {
     if (value === undefined) continue;
-    const { column: col } = column(model, key);
+    const { column: col } = column(model, key, translation);
     if (isOperators(value)) {
       for (const [op, operand] of Object.entries(value)) {
         if (operand === undefined) continue;
@@ -157,7 +172,11 @@ export function scopingConditions(model: AnyModel, env: Env): SqlFragment[] {
 }
 
 /** `ORDER BY` from `'field'`, `'field asc'`, `'field desc'` entries, with an `id` tiebreaker. */
-export function compileOrder(model: AnyModel, order: readonly string[] | undefined): SqlFragment {
+export function compileOrder(
+  model: AnyModel,
+  order: readonly string[] | undefined,
+  translation?: TranslationScope,
+): SqlFragment {
   const terms: SqlFragment[] = [];
   const specs = order ?? model.order.map((o) => `${o.field} ${o.direction}`);
   let hasId = false;
@@ -169,7 +188,7 @@ export function compileOrder(model: AnyModel, order: readonly string[] | undefin
         "Use 'field', 'field asc' or 'field desc'.",
       );
     }
-    const { column: col } = column(model, key);
+    const { column: col } = column(model, key, translation);
     if (key === 'id') hasId = true;
     terms.push(direction === 'desc' ? sql`${col} DESC` : sql`${col} ASC`);
   }
