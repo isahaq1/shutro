@@ -287,6 +287,15 @@ export interface AggregateQuery<S, M extends ModelName<S>, G extends string, Ms>
     | `${G | (keyof Ms & string)} ${'asc' | 'desc'}`
   )[];
   readonly limit?: number;
+  /**
+   * Several groupings in one statement (`GROUP BY GROUPING SETS`, RFC 0016 amendment for Kosh pivots): each set is a
+   * subset of `groupBy`; `[]` is the grand total. Rows carry `$groups`, the names they are grouped by.
+   */
+  readonly groupingSets?: readonly (readonly G[])[];
+  /** Shorthand: every prefix of `groupBy`, down to the grand total (`ROLLUP`). */
+  readonly rollup?: boolean;
+  /** Shorthand: every subset of `groupBy` (`CUBE`, at most 6 groups). */
+  readonly cube?: boolean;
 }
 
 type GroupValue<S, M extends ModelName<S>, K> = K extends `${string}:${string}`
@@ -314,7 +323,10 @@ type MeasureValue<S, M extends ModelName<S>, X> = X extends 'count'
 /** A row of {@link ModelRef.aggregate}: the group values and the measures. */
 export type AggregateRow<S, M extends ModelName<S>, G extends string, Ms> = {
   readonly [K in G]: GroupValue<S, M, K>;
-} & { readonly [K in keyof Ms]: MeasureValue<S, M, Ms[K]> };
+} & { readonly [K in keyof Ms]: MeasureValue<S, M, Ms[K]> } & {
+  /** With grouping sets: the groups this row is grouped by (others are totals over them, not `null` values). */
+  readonly $groups?: readonly G[];
+};
 
 /** Fields {@link RecordSetApi.sum} accepts: integer, float, decimal and monetary. */
 export type SummableKeys<S, M extends ModelName<S>> = {

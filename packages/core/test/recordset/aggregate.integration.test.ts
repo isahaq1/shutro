@@ -167,6 +167,83 @@ afterAll(async () => {
 });
 
 describe('aggregate', () => {
+  test('grouping sets: every level and the grand total in one statement, per currency, within the rules', async () => {
+    const rows = await as(
+      1,
+      (env) =>
+        env.model('sale.order').aggregate({
+          groupBy: ['partner', 'state'],
+          rollup: true,
+          measures: { n: 'count', total: { sum: 'amount' } },
+        }),
+      ['base.manager'],
+    );
+    expectTypeOf(rows[0]?.$groups).toEqualTypeOf<readonly ('partner' | 'state')[] | undefined>();
+    const show = (r: (typeof rows)[number]) => [
+      r.$groups?.join('+'),
+      r.partner,
+      r.state,
+      r.n,
+      r.total.toString(),
+    ];
+    // Leaves, then per-partner subtotals, then the grand total; USD stays its own row at every level.
+    expect(rows.map(show)).toEqual([
+      ['partner+state', ids.acme, 'sale', 3, 'BDT 1150.50'],
+      ['partner+state', ids.globex, 'draft', 1, 'BDT 30.00'],
+      ['partner+state', ids.globex, 'sale', 1, 'USD 7.00'],
+      ['partner', ids.acme, null, 3, 'BDT 1150.50'],
+      ['partner', ids.globex, null, 1, 'BDT 30.00'],
+      ['partner', ids.globex, null, 1, 'USD 7.00'],
+      ['', null, null, 4, 'BDT 1180.50'],
+      ['', null, null, 1, 'USD 7.00'],
+    ]);
+    // Alice (no manager) sees only her own orders, at every level.
+    const own = await as(1, (env) =>
+      env
+        .model('sale.order')
+        .aggregate({ groupBy: ['state'], groupingSets: [['state'], []], measures: { n: 'count' } }),
+    );
+    expect(own.map((r) => [r.$groups, r.state, r.n])).toEqual([
+      [['state'], 'draft', 1],
+      [['state'], 'sale', 3],
+      [[], null, 4],
+    ]);
+  });
+
+  test('cube and explicit sets; a NULL value is not a total', async () => {
+    const rows = await as(
+      1,
+      (env) =>
+        env.model('sale.order').aggregate({
+          groupBy: ['state', 'dateOrder:month'],
+          cube: true,
+          measures: { n: 'count' },
+          where: { currency: ids.bdt as Id<'res.currency'> },
+        }),
+      ['base.manager'],
+    );
+    expect(new Set(rows.map((r) => r.$groups?.join('+')))).toEqual(
+      new Set(['state+dateOrder:month', 'state', 'dateOrder:month', '']),
+    );
+    expect(rows.find((r) => r.$groups?.length === 0)?.n).toBe(4);
+    await expect(
+      as(1, (env) =>
+        env.model('sale.order').aggregate({
+          groupBy: ['state'],
+          groupingSets: [['partner' as never]],
+          measures: { n: 'count' },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(InvalidDomainError);
+    await expect(
+      as(1, (env) =>
+        env
+          .model('sale.order')
+          .aggregate({ groupBy: ['state'], rollup: true, cube: true, measures: { n: 'count' } }),
+      ),
+    ).rejects.toBeInstanceOf(InvalidDomainError);
+  });
+
   test("groups, counts and per-currency Money totals, within the user's rules", async () => {
     const rows = await as(1, (env) =>
       env.model('sale.order').aggregate({

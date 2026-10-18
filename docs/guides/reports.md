@@ -22,6 +22,22 @@ const rows = await env.model('sale.order').aggregate({
   record rules, company scope, and relation paths that respect the related model's rules.
 - Without `groupBy`, one row for the whole selection (`[{ orders: 0, ... }]` when nothing matches).
 
+### Subtotals in one statement: grouping sets, rollup, cube
+
+```ts
+const rows = await env.model('sale.order').aggregate({
+  groupBy: ['partner', 'dateOrder:month'],
+  rollup: true, // or cube: true, or groupingSets: [['partner', 'dateOrder:month'], ['partner'], []]
+  measures: { total: { sum: 'amountTotal' } },
+});
+// [{ $groups: ['partner', 'dateOrder:month'], partner: 7, 'dateOrder:month': '2026-09-01', total }, ...,
+//  { $groups: ['partner'], partner: 7, 'dateOrder:month': null, total }, ..., { $groups: [], total }]
+```
+
+One `GROUP BY GROUPING SETS` statement with the same security as above. `$groups` tells a subtotal (the group was
+aggregated away) from a group whose value is `NULL`. Rows come leaves first, then each subtotal level, then the grand
+total. Monetary measures keep one row per currency at every level. `cube` takes at most 6 groups.
+
 ## `sum()`: totals of loaded records
 
 ```ts
