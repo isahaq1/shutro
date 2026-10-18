@@ -166,6 +166,27 @@ afterAll(async () => {
   await pg?.stop();
 });
 
+describe('releaseCache', () => {
+  test('drops clean records, keeps unsaved changes', async () => {
+    await as(
+      1,
+      async (env) => {
+        const orders = await env.model('sale.order').search({ order: ['id'] });
+        const loaded = await orders.load(['name']);
+        expect(loaded.read(['name']).length).toBe(5);
+        const first = loaded.first();
+        await env.model('sale.order').browse([first.id]).write({ name: 'renamed before release' });
+        env.releaseCache();
+        expect(() => loaded.read(['name'])).toThrow(); // clean records were dropped: load them again
+        await env.flush(); // the unsaved change was kept
+        const again = await env.model('sale.order').browse([first.id]).load(['name']);
+        expect(again.first().name).toBe('renamed before release');
+      },
+      ['base.manager'],
+    );
+  });
+});
+
 describe('aggregate', () => {
   test('grouping sets: every level and the grand total in one statement, per currency, within the rules', async () => {
     const rows = await as(

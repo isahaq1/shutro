@@ -624,6 +624,29 @@ export class Env<S = unknown> {
     return this.#derive({ companyId: company, companyIds });
   }
 
+  /**
+   * Drops clean records from this scope's cache (all models, or one): for long reads in one transaction, such as
+   * streaming an export of millions of rows page by page, so memory stays bounded. Records with unsaved changes or
+   * pending computes and checks are kept; dropped records are simply loaded again when read.
+   */
+  releaseCache(model?: string): void {
+    const scope = internalsOf(this as unknown as Env);
+    const root = this.#scope.root;
+    for (const name of model === undefined ? [...root.cache.records.keys()] : [model]) {
+      const byId = root.cache.records.get(name);
+      if (byId === undefined) continue;
+      const pending = (sets: Map<string, Map<string, Set<number>>>) =>
+        [...(sets.get(name)?.values() ?? [])].flatMap((set) => [...set]);
+      const keep = new Set([
+        ...(root.dirty.get(name)?.keys() ?? []),
+        ...pending(root.triggers),
+        ...pending(root.toCompute),
+        ...pending(root.toCheck),
+      ]);
+      for (const id of [...byId.keys()]) if (!keep.has(id)) scope.forget(name, id);
+    }
+  }
+
   /** The same scope with another language. */
   withLang(lang: string): Env<S> {
     return this.#derive({ lang: assertLang(lang) });

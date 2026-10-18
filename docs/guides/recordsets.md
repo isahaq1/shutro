@@ -182,3 +182,9 @@ const atClose = await env.asOf(new Date('2026-09-30T23:59:59+06:00'), async (pas
 - `env.asOf(instant, fn)` reads the models with history as they were at `instant` (search, load, relations,
   filters through paths, aggregates), with today's record rules and field security. Models without history are read
   as they are now. The past is read-only and has its own cache.
+
+## Long reads in one transaction: `env.releaseCache()`
+
+A scope caches every record it loads. For long reads (an export of millions of rows, page by page, in one consistent
+transaction), call `env.releaseCache()` (or `releaseCache('sale.order')`) after each page: clean records are dropped
+and loaded again if read; records with unsaved changes or pending computes and checks are kept.
