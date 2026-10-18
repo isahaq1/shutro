@@ -169,7 +169,23 @@ export const sql: SqlTag = Object.assign(tag, {
         'Pass an array of values; use sql.param() for a single value.',
       );
     }
-    return fragment(param(values, `${checkType(elementType)}[]`));
+    const type = checkType(elementType);
+    // Arrays of bytes: the driver infers `bytea` from the elements and the `bytea[]` cast then fails. They travel
+    // as hex text (`\x…`) and are cast element-wise on the server.
+    if (type === 'bytea') {
+      const hex = values.map((v) =>
+        v instanceof Uint8Array ? `\\x${Buffer.from(v).toString('hex')}` : v,
+      );
+      return fragment({
+        kind: 'seq',
+        nodes: Object.freeze([
+          Object.freeze({ kind: 'text', text: '(' }),
+          param(hex, 'text[]'),
+          Object.freeze({ kind: 'text', text: ')::bytea[]' }),
+        ]) as readonly SqlNode[],
+      });
+    }
+    return fragment(param(values, `${type}[]`));
   },
 
   cast(value: SqlFragment, type: string): SqlFragment {
