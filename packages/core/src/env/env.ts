@@ -46,6 +46,7 @@ import {
 import {
   assertAccess,
   assertPermission,
+  assertRecords,
   canAccess,
   canField,
   hasPermission,
@@ -380,6 +381,11 @@ export class Env<S = unknown> {
     can(model: ModelName<S>, perm: Perm): boolean;
     /** @throws {AccessError} */
     check(model: ModelName<S>, perm: Perm): void;
+    /**
+     * Checks model access and the record rules of `perm` for these ids without changing anything: may this user write
+     * (or unlink) these records? @throws {AccessError} out of scope, {@link MissingRecordError} for unknown ids
+     */
+    checkRecords(model: ModelName<S>, ids: readonly number[], perm: RulePerm): Promise<void>;
     canField(model: ModelName<S>, field: string, kind: 'read' | 'write'): boolean;
     /** The feature permission `code` (`definePermission`): granted by a group, or administrator. */
     has(code: string): boolean;
@@ -395,6 +401,11 @@ export class Env<S = unknown> {
     return {
       can: (model, perm) => canAccess(scope, scope.registry.get(model).model, perm),
       check: (model, perm) => assertAccess(scope, scope.registry.get(model).model, perm),
+      checkRecords: async (model, ids, perm) => {
+        const target = scope.registry.get(model).model;
+        assertAccess(scope, target, perm);
+        await assertRecords(scope, target, ids, perm);
+      },
       canField: (model, field, kind) =>
         canField(scope, scope.registry.get(model).model, field, kind),
       has: (code) => hasPermission(scope, code),

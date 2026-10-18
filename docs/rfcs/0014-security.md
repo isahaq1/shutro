@@ -80,8 +80,9 @@ declarations must name declared groups (build error otherwise).
 `defineModel({ access: { 'sale.user': ['read', 'write', 'create'], 'sale.manager': ['read', 'write', 'create',
 'unlink', 'export'] } })`; `extendModel({ access })` merges (union). `read` is checked by `search`, `load`,
 `onchange`, `trail`; `create` / `write` / `unlink` by the write runtime (so x2many commands are covered);
-`export` / `import` through `env.access.can(model, perm)` / `check` for the application. A model without an entry
-for any of the user's groups is denied (R2).
+`export` / `import` through `env.access.can(model, perm)` / `check` for the application;
+`env.access.checkRecords(model, ids, perm)` checks the ACL and the rules of `perm` for given records without
+changing them (may this user write these?). A model without an entry for any of the user's groups is denied (R2).
 
 ### 7.3 Record rules
 
