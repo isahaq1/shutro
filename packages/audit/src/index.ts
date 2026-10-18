@@ -137,6 +137,8 @@ export interface TrailFilter {
   readonly action?: AuditAction | undefined;
   /** Rows at or after this time. */
   readonly since?: Date | undefined;
+  /** Rows older than this row id: the cursor of the next page (the `id` of the last row of the previous one). */
+  readonly before?: number | undefined;
   /** Newest first; default 100. */
   readonly limit?: number | undefined;
 }
@@ -153,6 +155,7 @@ export function trailQuery(filter: TrailFilter = {}): CompiledSql {
   if (filter.uid !== undefined) conditions.push(sql`${sql.id('uid')} = ${filter.uid}`);
   if (filter.action !== undefined) conditions.push(sql`${sql.id('action')} = ${filter.action}`);
   if (filter.since !== undefined) conditions.push(sql`${sql.id('at')} >= ${filter.since}`);
+  if (filter.before !== undefined) conditions.push(sql`${sql.id('id')} < ${filter.before}`);
   const where =
     conditions.length === 0 ? sql.empty : sql` WHERE ${sql.join(conditions, sql` AND `)}`;
   return compile(

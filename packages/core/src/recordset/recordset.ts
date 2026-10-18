@@ -701,6 +701,8 @@ export class RecordSetImpl {
       readonly field?: string;
       readonly limit?: number;
       readonly action?: AuditEntry['action'];
+      /** Rows older than this row id (pagination: the last `id` of the previous page). */
+      readonly before?: number;
     } = {},
   ): Promise<AuditEntry[]> {
     const internals = internalsOf(this.env);

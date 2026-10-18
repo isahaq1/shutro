@@ -235,6 +235,8 @@ export interface RecordSetApi<S, M extends ModelName<S>, L> {
     readonly field?: Keys<S, M>;
     readonly limit?: number;
     readonly action?: AuditAction;
+    /** Rows older than this row id: the next page after the last `id` of the previous one. */
+    readonly before?: number;
   }): Promise<readonly AuditEntry[]>;
   /** Numbers these records from their manual sequence (RFC 0012 §7.4); records with a number are refused. */
   assignNumber<K extends SequenceKeys<S, M>>(

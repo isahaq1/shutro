@@ -59,5 +59,8 @@ describe('audit statements', () => {
     expect(text).toContain('ORDER BY "id" DESC LIMIT $4');
     expect(params).toEqual(['sale.order', [7, 8], 'state', 5]);
     expect(trailQuery().text).not.toContain('WHERE');
+    const page = trailQuery({ model: 'sale.order', before: 42, limit: 2 });
+    expect(page.text).toContain('"id" < $2');
+    expect(page.params).toEqual(['sale.order', 42, 2]);
   });
 });

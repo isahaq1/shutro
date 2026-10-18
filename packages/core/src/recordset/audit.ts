@@ -18,6 +18,7 @@ import type { ScopeInternals } from '../env/env.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { Money } from '../money/money.js';
+import { canField } from './security.js';
 
 const ensured = new WeakSet<Driver>();
 
@@ -265,7 +266,11 @@ export async function flushAudit(internals: ScopeInternals, model?: string): Pro
   await internals.query(insertAuditStatement(coalesced));
 }
 
-/** `records.trail()`: the rows of these records, newest first, after a flush. */
+/**
+ * `records.trail()`: the rows of these records, newest first, after a flush. Field security applies: rows of fields
+ * the scope may not read are left out, and such fields are removed from create / delete snapshots (a page may then
+ * hold fewer rows than `limit`; `before` the last id read continues it).
+ */
 export async function trailOf(
   internals: ScopeInternals,
   model: AnyModel,
@@ -273,8 +278,22 @@ export async function trailOf(
   filter: Omit<TrailFilter, 'model' | 'recordIds'>,
 ): Promise<AuditEntry[]> {
   await internals.flush();
-  return readTrail(
+  const rows = await readTrail(
     { query: (q) => internals.query(q) },
     { ...filter, model: model.name, recordIds: ids },
   );
+  const readable = (key: string) => canField(internals, model, key, 'read');
+  const out: AuditEntry[] = [];
+  for (const row of rows) {
+    if (row.field !== null) {
+      if (readable(row.field)) out.push(row);
+      continue;
+    }
+    const strip = (snapshot: unknown) =>
+      snapshot !== null && typeof snapshot === 'object' && !Array.isArray(snapshot)
+        ? Object.fromEntries(Object.entries(snapshot).filter(([key]) => readable(key)))
+        : snapshot;
+    out.push({ ...row, old: strip(row.old), new: strip(row.new) });
+  }
+  return out;
 }

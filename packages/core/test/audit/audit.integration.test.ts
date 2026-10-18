@@ -194,6 +194,10 @@ describe('audit trail', () => {
       await so.write({ note: 'y' });
       expect(brief(await so.trail({ field: 'note' }))).toEqual(['write:note="x">"y"']);
       expect((await so.trail()).length).toBe(2);
+      // Pages: newest first, then older than the last row seen.
+      const [newest] = await so.trail({ limit: 1 });
+      const older = await so.trail({ before: newest?.id as number });
+      expect(older.map((e) => e.action)).toEqual(['create']);
     });
     await expect(
       driver.query(compile(sql`UPDATE shutro_audit SET reason = ${'tampered'}`)),

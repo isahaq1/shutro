@@ -85,8 +85,11 @@ many2one, `{ amount, currency }` for money, ISO strings for datetimes, decimal s
 
 ### 7.4 Reading
 
-`records.trail({ field?, limit? })` flushes and returns the record's rows newest first (`AuditEntry[]`);
-`readTrail(runner, filter)` in `@shutro/audit` queries any scope (model, records, field, user, action, since).
+`records.trail({ field?, limit?, action?, before? })` flushes and returns the record's rows newest first
+(`AuditEntry[]`); `before` (a row id) pages through long histories. Field security applies: rows of fields the scope
+may not read are left out and such fields are removed from create / delete snapshots. `readTrail(runner, filter)` in
+`@shutro/audit` queries any scope (model, records, field, user, action, since, before) without field security, for
+system code.
 
 ## 8. Type-level guarantees
 
@@ -98,10 +101,10 @@ many2one, `{ amount, currency }` for money, ISO strings for datetimes, decimal s
 
 ## 10. Interactions
 
-- **Security:** the trail is readable through `records.trail()` subject to the model's read access; field-level rules
-  should hide `old` / `new` of protected fields (security RFC).
+- **Security:** the trail is readable through `records.trail()` subject to the model's read access and field
+  security (unreadable fields are left out, §7.4).
 - **Migrate:** `shutro_audit` is infrastructure; the generator and the schema diff ignore it.
-- **Kosh:** the chatter / timeline reads `readTrail` directly.
+- **Kosh:** the chatter's change log reads `records.trail()` as the user, so field security applies.
 
 ## 11. Resolved questions
 
