@@ -138,6 +138,14 @@ export {
   UomMismatchError,
   ValidationError,
 } from './errors.js';
+export {
+  type EnqueueOptions,
+  eventTableStatements,
+  JOB_CHANNEL,
+  OUTBOX_CHANNEL,
+  releaseStale,
+} from './events/events.js';
+export type { DeliveredEvent, RunningJob, Worker } from './events/workers.js';
 export type { CreateOf, FlagsOfField, ReadOf, WriteOf } from './model/faces.js';
 export type { SequenceFieldOptions, TextWrite } from './model/field.js';
 export {

@@ -22,6 +22,15 @@ import {
   NoRegistryError,
   TransactionScopeError,
 } from '../errors.js';
+import { type EnqueueOptions, emitEvent, enqueueJob, ensureEventTables } from '../events/events.js';
+import {
+  type DeliveredEvent,
+  type RunningJob,
+  subscribe,
+  type Worker,
+  type WorkerHost,
+  work,
+} from '../events/workers.js';
 import type { Id } from '../model/id.js';
 import { createFx, type Fx } from '../money/fx.js';
 import { trackElevation, trackSecurityChange, trackSuperuser } from '../recordset/audit.js';
@@ -441,6 +450,32 @@ export class Env<S = unknown> {
       grantPermission: (role, permission) => apply({ kind: 'permission', role, permission }),
       revokePermission: (role, permission) => apply({ kind: 'revokePermission', role, permission }),
     };
+  }
+
+  /**
+   * Emits a domain event in this transaction (RFC 0018 §7.2): it exists if and only if the transaction commits, and
+   * subscribers (`shutro.subscribe`) receive it at least once. Returns the event id.
+   */
+  async emit(topic: string, payload: unknown): Promise<number> {
+    const scope = internalsOf(this as unknown as Env);
+    const query = <R extends Row>(q: DriverQuery) => scope.query<R>(q);
+    await ensureEventTables(this.#runtime.driver, query);
+    return emitEvent(query, this.#actor(), topic, payload);
+  }
+
+  /**
+   * Enqueues a background job in this transaction (RFC 0018 §7.3), run by `shutro.work` as this user, with
+   * retries. With `key`, a job already pending or running under that key makes this a no-op (returns `null`).
+   */
+  async enqueue(name: string, payload: unknown, options?: EnqueueOptions): Promise<number | null> {
+    const scope = internalsOf(this as unknown as Env);
+    const query = <R extends Row>(q: DriverQuery) => scope.query<R>(q);
+    await ensureEventTables(this.#runtime.driver, query);
+    return enqueueJob(query, this.#actor(), name, payload, options);
+  }
+
+  #actor(): { uid: number; companyId: number; groups: readonly string[] } {
+    return { uid: this.uid, companyId: this.companyId, groups: [...this.groups] };
   }
 
   /** Dated, per-company currency conversion (RFC 0006 §7.6). Needs a `res.currency.rate` model. */
@@ -993,8 +1028,27 @@ export interface Shutro<S = unknown> {
   currentEnv(): Env<S>;
   /** The registry this instance was created with. */
   readonly registry: Registry | undefined;
+  /** The driver this instance was created with. */
+  readonly driver: Driver;
   /** Reloads runtime security now (changes are also reloaded automatically after they commit). */
   reloadSecurity(): Promise<void>;
+  /**
+   * A subscriber of `topic` named `name` (RFC 0018 §7.2): events in order, at least once, the cursor advancing in the
+   * handler's transaction. One delivery at a time per name, across processes.
+   */
+  subscribe(
+    name: string,
+    topic: string,
+    handler: (event: DeliveredEvent, env: Env<S>) => Promise<void>,
+    options?: { readonly attempts?: number; readonly pollMs?: number },
+  ): Worker;
+  /** A job worker for these job names (RFC 0018 §7.3); start any number, in any processes. */
+  work(
+    handlers: Readonly<
+      Record<string, (payload: unknown, env: Env<S>, job: RunningJob) => Promise<void>>
+    >,
+    options?: { readonly pollMs?: number },
+  ): Worker;
 }
 
 const defaultBackoff = (attempt: number): number =>
@@ -1022,6 +1076,14 @@ function assertPoolFits<S>(options: ShutroOptions<S>): void {
     `Sequence(s) ${standard.join(', ')} need a pool of at least 2 connections; the driver has max: 1.`,
     'Raise the driver max, or declare the sequences gapless: true (allocated inside the business transaction).',
   );
+}
+
+function workerHost<S>(shutro: Shutro<S>): WorkerHost {
+  return {
+    driver: shutro.driver,
+    run: (o, fn) => shutro.run(o, fn as never),
+    bootstrap: (o, fn) => shutro.bootstrap(o, fn as never),
+  };
 }
 
 /** Creates a {@link Shutro} instance on a driver (and a registry). */
@@ -1121,7 +1183,16 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
     },
 
     registry: options.registry as Registry | undefined,
+    driver: options.driver,
     reloadSecurity: reload,
+
+    subscribe(name, topic, handler, subscribeOptions) {
+      return subscribe(workerHost(this), name, topic, handler as never, subscribeOptions);
+    },
+
+    work(handlers, workOptions) {
+      return work(workerHost(this), handlers as never, workOptions);
+    },
 
     currentEnv(): Env<S> {
       const scope = runtime.als.getStore();
