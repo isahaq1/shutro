@@ -91,4 +91,12 @@ test('rows and snapshot keys of unreadable fields are left out', async () => {
   );
   expect(userTrail.map((r) => `${r.action}:${r.field ?? ''}`)).toEqual(['write:name', 'create:']);
   expect(userTrail[1]?.new).toEqual({ name: 'D1' });
+
+  // `limit` counts visible rows: hidden margin rows do not shorten a page.
+  for (const margin of ['16%', '17%', '18%'])
+    await shutro.run(finance, (env) => env.model('x.deal').browse([id]).write({ margin }));
+  const page = await shutro.run({ user: 1, company: 1, groups: ['base.user'] }, (env) =>
+    env.model('x.deal').browse([id]).trail({ limit: 2 }),
+  );
+  expect(page.map((r) => `${r.action}:${r.field ?? ''}`)).toEqual(['write:name', 'create:']);
 });

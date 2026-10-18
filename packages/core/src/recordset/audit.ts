@@ -268,8 +268,8 @@ export async function flushAudit(internals: ScopeInternals, model?: string): Pro
 
 /**
  * `records.trail()`: the rows of these records, newest first, after a flush. Field security applies: rows of fields
- * the scope may not read are left out, and such fields are removed from create / delete snapshots (a page may then
- * hold fewer rows than `limit`; `before` the last id read continues it).
+ * the scope may not read are left out, and such fields are removed from create / delete snapshots. `limit` counts
+ * the rows returned (more are read when some are left out), so a page shorter than `limit` is the last one.
  */
 export async function trailOf(
   internals: ScopeInternals,
@@ -278,22 +278,25 @@ export async function trailOf(
   filter: Omit<TrailFilter, 'model' | 'recordIds'>,
 ): Promise<AuditEntry[]> {
   await internals.flush();
-  const rows = await readTrail(
-    { query: (q) => internals.query(q) },
-    { ...filter, model: model.name, recordIds: ids },
-  );
+  const limit = filter.limit ?? 100;
   const readable = (key: string) => canField(internals, model, key, 'read');
+  const strip = (snapshot: unknown) =>
+    snapshot !== null && typeof snapshot === 'object' && !Array.isArray(snapshot)
+      ? Object.fromEntries(Object.entries(snapshot).filter(([key]) => readable(key)))
+      : snapshot;
   const out: AuditEntry[] = [];
-  for (const row of rows) {
-    if (row.field !== null) {
-      if (readable(row.field)) out.push(row);
-      continue;
+  let before = filter.before;
+  for (;;) {
+    const rows = await readTrail(
+      { query: (q) => internals.query(q) },
+      { ...filter, model: model.name, recordIds: ids, limit, before },
+    );
+    for (const row of rows) {
+      if (row.field === null) out.push({ ...row, old: strip(row.old), new: strip(row.new) });
+      else if (readable(row.field)) out.push(row);
+      if (out.length === limit) return out;
     }
-    const strip = (snapshot: unknown) =>
-      snapshot !== null && typeof snapshot === 'object' && !Array.isArray(snapshot)
-        ? Object.fromEntries(Object.entries(snapshot).filter(([key]) => readable(key)))
-        : snapshot;
-    out.push({ ...row, old: strip(row.old), new: strip(row.new) });
+    if (rows.length < limit) return out;
+    before = rows[rows.length - 1]?.id;
   }
-  return out;
 }

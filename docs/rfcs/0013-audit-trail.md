@@ -87,7 +87,7 @@ many2one, `{ amount, currency }` for money, ISO strings for datetimes, decimal s
 
 `records.trail({ field?, limit?, action?, before? })` flushes and returns the record's rows newest first
 (`AuditEntry[]`); `before` (a row id) pages through long histories. Field security applies: rows of fields the scope
-may not read are left out and such fields are removed from create / delete snapshots. `readTrail(runner, filter)` in
+may not read are left out and such fields are removed from create / delete snapshots; `limit` counts the rows returned. `readTrail(runner, filter)` in
 `@shutro/audit` queries any scope (model, records, field, user, action, since, before) without field security, for
 system code.
 
