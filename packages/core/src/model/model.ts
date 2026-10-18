@@ -245,6 +245,11 @@ export interface ModelDefinition<
    * as their own (read, write, filter), stored in the target. Creating a record creates its target record.
    */
   readonly delegates?: readonly ModelKeys<Fs, A, C>[];
+  /**
+   * Keep every version of the rows (RFC 0018 §7.4): a trigger archives the old row into `<table>_history`, and
+   * `env.asOf(instant, fn)` reads the model as it was then.
+   */
+  readonly history?: boolean;
   readonly indexes?: readonly IndexSpec<ModelKeys<Fs, A, C>>[];
   readonly sqlConstraints?: Readonly<
     Record<string, SqlUniqueConstraint<ModelKeys<Fs, A, C>> | SqlCheckConstraint>
@@ -444,6 +449,7 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly backdate: BackdateSpec<keyof Fs & string> | undefined;
   readonly hierarchy: HierarchySpec<keyof Fs & string> | undefined;
   readonly delegates: readonly (keyof Fs & string)[];
+  readonly history: boolean;
   readonly indexes: readonly ResolvedIndex<keyof Fs & string>[];
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
@@ -1103,6 +1109,7 @@ export function defineModel<
     backdate: backdate === undefined ? undefined : Object.freeze({ ...backdate }),
     hierarchy: hierarchy === undefined ? undefined : Object.freeze({ ...hierarchy }),
     delegates: Object.freeze(delegates),
+    history: definition.history === true,
     indexes: Object.freeze(indexes),
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),

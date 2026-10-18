@@ -1,6 +1,6 @@
 # RFC 0018: Lost-update protection, transactional events, jobs and history
 
-- **Status:** Accepted (§7.1 implemented; §7.2–§7.4 implemented as they land)
+- **Status:** Implemented
 - **Related:** 0003 (transactions, retries), 0004 (writes), 0013 (audit), 0014 (security)
 
 ## 1. Summary

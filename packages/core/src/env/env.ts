@@ -164,6 +164,8 @@ interface RootScope {
   /** Next virtual id for drafts (negative, RFC 0009 §7.4). */
   virtual: number;
   readonly uid: number;
+  /** Set in `env.asOf` scopes: reads see the models with history as they were then; writes are refused. */
+  readonly asOf?: Date;
 }
 
 /** Compute-engine state of an attempt (RFC 0008 §7.3, §7.5). */
@@ -203,6 +205,8 @@ export interface ScopeInternals {
   readonly registry: Registry;
   /** Runtime security additions (RFC 0014 §7.10), when enabled. */
   readonly overlay: RuntimeSecurity | undefined;
+  /** The instant of an `env.asOf` scope (RFC 0018 §7.4). */
+  readonly asOf: Date | undefined;
   readonly cache: RecordCache;
   readonly uid: number;
   readonly now: Date;
@@ -623,6 +627,51 @@ export class Env<S = unknown> {
   }
 
   /**
+   * Runs `fn` reading the past (RFC 0018 §7.4): models with `history: true` are searched and loaded as they were at
+   * `instant` (rules, field groups and company scope apply as now); other models are read as they are now. The
+   * environment has its own cache and is read-only: writes are refused.
+   *
+   * ```ts
+   * const atClose = await env.asOf(new Date('2026-09-30T23:59:59Z'), (past) => past.model('account.move').search({ where: { state: 'posted' } }).then((m) => m.read(['name', 'amountTotal'])));
+   * ```
+   */
+  async asOf<T>(instant: Date, fn: (past: Env<S>) => Promise<T>): Promise<T> {
+    this.#assertUsable();
+    if (!(instant instanceof Date) || Number.isNaN(instant.getTime()))
+      throw new InvalidIdentityError(
+        'asOf() needs a valid Date.',
+        "Pass the instant to read, e.g. new Date('2026-09-30T23:59:59Z').",
+      );
+    const parent = this.#scope;
+    const root: RootScope = {
+      ...parent.root,
+      top: undefined as unknown as Scope,
+      cache: createRecordCache(),
+      dirty: new Map(),
+      triggers: new Map(),
+      toCompute: new Map(),
+      toCheck: new Map(),
+      audit: [],
+      compute: {
+        recomputing: false,
+        computing: new Set(),
+        protected: new Map(),
+        previous: new Map(),
+      },
+      asOf: instant,
+    };
+    const scope: Scope = { ...parent, root, afterCommit: [], onRollback: [], journal: undefined };
+    root.top = scope;
+    const past = this.#derive({ readOnly: true }, scope);
+    scope.env = past as unknown as Env;
+    try {
+      return await this.#runtime.als.run(scope, () => fn(past));
+    } finally {
+      parent.root.queries += root.queries;
+    }
+  }
+
+  /**
    * Runs `fn` with extra special grants in the same scope (RFC 0014 §7.9): a narrow, audited alternative to
    * {@link asSuperuser} for code that must touch a model or feature its caller cannot. Record rules, field groups
    * and company scoping still apply; only the named grants are added, and only inside `fn`.
@@ -771,6 +820,7 @@ function scopeInternals(
     env,
     registry,
     overlay,
+    asOf: root.asOf,
     cache: root.cache,
     uid: root.uid,
     now: root.now,

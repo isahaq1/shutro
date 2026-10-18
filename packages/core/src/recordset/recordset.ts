@@ -50,6 +50,7 @@ import {
   ruleConditions,
 } from './security.js';
 import { assignNumbers } from './sequences.js';
+import { sourceOf } from './source.js';
 import { availableTransitions, runTransition } from './transitions.js';
 import { companyValue } from './values.js';
 import {
@@ -217,7 +218,7 @@ async function fetchMissing(
       const chunk = missing.slice(i, i + CHUNK);
       const rows = await loader.internals.query<Record<string, unknown>>(
         compile(
-          sql`SELECT ${columns} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${chunk})${scope}`,
+          sql`SELECT ${columns} FROM ${sourceOf(loader.internals, model)} WHERE ${sql.id('id')} = ANY(${chunk})${scope}`,
         ),
       );
       for (const row of rows) seen.add(hydrate(loader, model, row, wanted));
@@ -240,7 +241,7 @@ async function assertExist(
 ): Promise<void> {
   const rows = await loader.internals.query<{ id: number }>(
     compile(
-      sql`SELECT ${sql.id('id')} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${[...ids]})${scope}`,
+      sql`SELECT ${sql.id('id')} FROM ${sourceOf(loader.internals, model)} WHERE ${sql.id('id')} = ANY(${[...ids]})${scope}`,
     ),
   );
   const found = new Set(rows.map((r) => Number(r.id)));
@@ -362,7 +363,7 @@ async function fetchX2Many(
         const inverse = sql.id(target.columns[field.inverseField ?? ''] ?? '');
         rows = await loader.internals.query(
           compile(
-            sql`SELECT ${t}.${inverse} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(target.table)} AS ${t} WHERE ${t}.${inverse} = ANY(${chunk})${scope} ORDER BY ${order}`,
+            sql`SELECT ${t}.${inverse} AS ${sql.id('parent_id')}, ${columns} FROM ${sourceOf(loader.internals, target)} AS ${t} WHERE ${t}.${inverse} = ANY(${chunk})${scope} ORDER BY ${order}`,
           ),
         );
       } else {
@@ -958,6 +959,7 @@ function translationScope(internals: ScopeInternals): TranslationScope {
     lang: internals.env.lang,
     source: internals.sourceLang,
     company: internals.env.companyId,
+    ...(internals.asOf === undefined ? {} : { from: (m: AnyModel) => sourceOf(internals, m) }),
   };
 }
 
@@ -1074,7 +1076,7 @@ export function modelRef(
       const offset = query.offset === undefined ? sql.empty : sql` OFFSET ${query.offset}`;
       const rows = await internals.query<Record<string, unknown>>(
         compile(
-          sql`SELECT ${columns} FROM ${sql.id(model.table)}${where} ORDER BY ${compileOrder(model, query.order, translation)}${limit}${offset}`,
+          sql`SELECT ${columns} FROM ${sourceOf(internals, model)}${where} ORDER BY ${compileOrder(model, query.order, translation)}${limit}${offset}`,
         ),
       );
       const ids = rows.map((row) => hydrate(loader, model, row, wanted));

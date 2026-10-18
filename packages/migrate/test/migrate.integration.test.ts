@@ -209,6 +209,27 @@ describe('plan, write, apply', () => {
     await scratch.end();
   });
 
+  test('history tables: the stopgap and the migrator agree', async () => {
+    const Doc = defineModel('x.doc', {
+      history: true,
+      fields: { name: f.char({ required: true }), total: f.decimal({ scale: 2 }) },
+    });
+    const registry = buildRegistry({
+      modules: [defineModule({ name: 'x', models: [...baseModels(), Doc] })],
+    }) as Registry;
+    const scratch = createDriver({ url: pg.url, max: 1 });
+    await scratch.query({ text: 'CREATE SCHEMA history_check', params: [] });
+    await scratch.query({ text: 'SET search_path TO history_check', params: [] });
+    for (const statement of createTableStatements(registry)) await scratch.query(statement);
+    const plan = await planMigration({ driver: scratch, registry, schema: 'history_check' });
+    expect(plan.operations.filter((o) => o.kind !== 'createIndex')).toEqual([]);
+    const live = await readLiveSchema(scratch, 'history_check');
+    expect(Object.keys(live.tables['x_doc_history']?.columns ?? {})).toEqual(
+      expect.arrayContaining(['id', 'name', 'total', 'valid_from', 'valid_to']),
+    );
+    await scratch.end();
+  });
+
   test('a tampered applied file is refused', async () => {
     const path = join(dir, '0001_init.sql');
     const original = readFileSync(path, 'utf8');

@@ -399,6 +399,13 @@ export async function createRecords(
 ): Promise<number[]> {
   const { internals } = host;
   if (input.length === 0) return [];
+  if (host.internals.asOf !== undefined)
+    fail(
+      model,
+      [],
+      'cannot be written in an asOf() scope.',
+      'The past is read-only: write outside env.asOf().',
+    );
   const rows = model.delegates.length > 0 ? await createDelegates(host, model, input) : input;
   assertAccess(internals, model, 'create');
   if (options.copy === true) assertAccess(internals, model, 'import');
@@ -607,6 +614,13 @@ export async function writeRecords(
 ): Promise<void> {
   const { internals } = host;
   if (ids.length === 0) return;
+  if (internals.asOf !== undefined)
+    fail(
+      model,
+      [],
+      'cannot be written in an asOf() scope.',
+      'The past is read-only: write outside env.asOf().',
+    );
   assertAccess(internals, model, 'write');
   assertFields(internals, model, Object.keys(values), 'write');
   if (model.backdate !== undefined && model.backdate.field in values)
@@ -724,6 +738,13 @@ export async function unlinkRecords(
 ): Promise<void> {
   const { internals } = host;
   if (ids.length === 0) return;
+  if (internals.asOf !== undefined)
+    fail(
+      model,
+      [],
+      'cannot be deleted in an asOf() scope.',
+      'The past is read-only: delete outside env.asOf().',
+    );
   assertAccess(internals, model, 'unlink');
   await internals.flush(model.name);
   await assertRecords(internals, model, ids, 'unlink');

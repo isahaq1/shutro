@@ -224,7 +224,7 @@ export async function runAggregate(
   const limit = query.limit === undefined ? sql.empty : sql` LIMIT ${query.limit}`;
   const rows = await internals.query<Record<string, unknown>>(
     compile(
-      sql`SELECT ${sql.join(select)} FROM ${sql.id(model.table)}${where}${groupBy}${order}${limit}`,
+      sql`SELECT ${sql.join(select)} FROM ${host.translation.from?.(model) ?? sql.id(model.table)}${where}${groupBy}${order}${limit}`,
     ),
   );
   const out: Record<string, unknown>[] = [];

@@ -23,6 +23,7 @@ import { AccessError, MissingRecordError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { compileDomain } from './domain.js';
+import { sourceOf } from './source.js';
 import { bindValue } from './values.js';
 
 const HINT =
@@ -279,7 +280,7 @@ export async function assertRecords(
   if (conditions.length === 0) return;
   const rows = await internals.query<{ id: number }>(
     compile(
-      sql`SELECT ${sql.id('id')} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${sql.array(real, 'bigint')}) AND ${sql.join(conditions, sql` AND `)}`,
+      sql`SELECT ${sql.id('id')} FROM ${sourceOf(internals, model)} WHERE ${sql.id('id')} = ANY(${sql.array(real, 'bigint')}) AND ${sql.join(conditions, sql` AND `)}`,
     ),
   );
   const passed = new Set(rows.map((r) => Number(r.id)));
@@ -297,7 +298,7 @@ export async function explainDenied(
 ): Promise<never> {
   const existing = await internals.query<{ id: number }>(
     compile(
-      sql`SELECT ${sql.id('id')} FROM ${sql.id(model.table)} WHERE ${sql.id('id')} = ANY(${sql.array([...denied], 'bigint')})`,
+      sql`SELECT ${sql.id('id')} FROM ${sourceOf(internals, model)} WHERE ${sql.id('id')} = ANY(${sql.array([...denied], 'bigint')})`,
     ),
   );
   const found = new Set(existing.map((r) => Number(r.id)));

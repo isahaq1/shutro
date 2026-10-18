@@ -311,7 +311,12 @@ export type {
   X2ManyKeys,
 } from './recordset/types.js';
 export { copyField } from './recordset/writes.js';
-export { columnDefault, createTableStatements } from './registry/ddl.js';
+export {
+  columnDefault,
+  createTableStatements,
+  historyStatements,
+  historyTable,
+} from './registry/ddl.js';
 export {
   type AnyExtension,
   type Extension,

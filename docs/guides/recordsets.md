@@ -163,3 +163,22 @@ await invoice.write({ amount: '95.00' }, { expect: { updatedAt: invoice.updatedA
 The records are locked and compared before the write; if someone saved first, the write is a `StaleRecordError`
 (records and fields named) instead of silently overwriting their change. Any stored fields can be expected
 (`{ state: 'draft' }` as a guard). Of two racing saves from the same read, exactly one wins.
+
+## Time travel
+
+```ts
+export const AccountMove = defineModel('account.move', { history: true, fields: { /* ... */ } });
+
+// What did posted invoices look like at the September close?
+const atClose = await env.asOf(new Date('2026-09-30T23:59:59+06:00'), async (past) =>
+  (await past.model('account.move').search({ where: { state: 'posted' } })).read(['name', 'amountTotal']),
+);
+```
+
+- With `history: true`, a trigger archives each row's previous version into `<table>_history` with its validity
+  range: on the first change in each transaction (versions nobody else could see are not kept) and on delete.
+  Raw SQL changes are versioned too. `shutro migrate apply` installs the triggers; the migrator keeps the history
+  table's columns in step with the model.
+- `env.asOf(instant, fn)` reads the models with history as they were at `instant` (search, load, relations,
+  filters through paths, aggregates), with today's record rules and field security. Models without history are read
+  as they are now. The past is read-only and has its own cache.

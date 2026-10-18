@@ -80,6 +80,42 @@ function columnDdl(model: AnyModel, key: string, field: Field, column: string): 
   return parts.join(' ');
 }
 
+/** The history table of a model with `history: true` (RFC 0018 §7.4). */
+export function historyTable(model: AnyModel): string {
+  return `${model.table}_history`.slice(0, 63);
+}
+
+/**
+ * The history trigger of a model: archives the row as it was before its first change in each transaction (and before
+ * a delete) with its validity range, and keeps `updated_at` at the transaction time on every update, so raw SQL
+ * writes are versioned too. Idempotent: run after migrations.
+ */
+export function historyStatements(registry: Registry): CompiledSql[] {
+  const out: string[] = [];
+  for (const { model } of registry.models.values()) {
+    if (!model.history) continue;
+    const t = ident(model.table);
+    const h = ident(historyTable(model));
+    const fn = ident(`shutro_history_${model.table}`.slice(0, 63));
+    const trigger = ident(`${model.table}_history_trg`.slice(0, 63));
+    out.push(
+      `CREATE OR REPLACE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN NEW.updated_at := now(); END IF;
+  -- Versions changed again in the same transaction were never visible to anyone: archive the first one only.
+  IF OLD.updated_at IS DISTINCT FROM now() THEN
+    INSERT INTO ${h} SELECT (jsonb_populate_record(NULL::${h}, to_jsonb(OLD) || jsonb_build_object('valid_from', OLD.updated_at, 'valid_to', now()))).* ON CONFLICT DO NOTHING;
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END $fn$`,
+      `DROP TRIGGER IF EXISTS ${trigger} ON ${t}`,
+      `CREATE TRIGGER ${trigger} BEFORE UPDATE OR DELETE ON ${t} FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
+    );
+  }
+  return out.map((text) => ({ text, params: [] }));
+}
+
 const ON_DELETE: Readonly<Record<string, string>> = {
   restrict: 'RESTRICT',
   cascade: 'CASCADE',
@@ -156,7 +192,20 @@ export function createTableStatements(registry: Registry): readonly CompiledSql[
       `CREATE TABLE ${ident(j.table)} (${ident(j.sourceColumn)} bigint NOT NULL REFERENCES ${ident(j.sourceTable)} (${ident('id')}) ON DELETE CASCADE, ${ident(j.targetColumn)} bigint NOT NULL REFERENCES ${ident(j.targetTable)} (${ident('id')}) ON DELETE CASCADE, PRIMARY KEY (${ident(j.sourceColumn)}, ${ident(j.targetColumn)}))`,
   );
 
-  return [...tables, ...foreignKeys, ...constraints, ...junctionDdl].map((text) =>
+  for (const { model } of registry.models.values()) {
+    if (!model.history) continue;
+    const cols = Object.entries(model.columns)
+      .filter((entry): entry is [string, string] => entry[1] !== undefined)
+      .map(([key, column]) => {
+        const field = model.fields[key] as Field;
+        return `${ident(column)} ${key === 'id' ? 'bigint NOT NULL' : field.kind === 'many2one' && !field.companyDependent ? 'bigint' : typeName(field, model.name, key)}`;
+      });
+    tables.push(
+      `CREATE TABLE ${ident(historyTable(model))} (${[...cols, '"valid_from" timestamp with time zone NOT NULL', '"valid_to" timestamp with time zone NOT NULL', 'PRIMARY KEY ("id", "valid_to")'].join(', ')})`,
+    );
+  }
+  const history = historyStatements(registry).map((c) => c.text);
+  return [...tables, ...foreignKeys, ...constraints, ...junctionDdl, ...history].map((text) =>
     Object.freeze({ text, params: Object.freeze([]) }),
   );
 }

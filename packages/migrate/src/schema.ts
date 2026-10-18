@@ -253,6 +253,40 @@ export function desiredSchema(registry: Registry): Schema {
     };
   }
 
+  // History tables (RFC 0018 §7.4): the main table's columns, nullable and unconstrained, plus the validity range.
+  for (const { model } of registry.models.values()) {
+    if (!model.history) continue;
+    const main = tables[model.table];
+    if (main === undefined) continue;
+    const name = `${model.table}_history`.slice(0, 63);
+    const columns: Record<string, ColumnSpec> = {};
+    for (const [column, spec] of Object.entries(main.columns))
+      columns[column] = {
+        ...spec,
+        nullable: column !== 'id',
+        default: null,
+        identity: false,
+        backfill: null,
+      };
+    for (const column of ['valid_from', 'valid_to'])
+      columns[column] = {
+        name: column,
+        type: 'timestamp with time zone',
+        nullable: false,
+        default: null,
+        identity: false,
+        backfill: null,
+      };
+    tables[name] = {
+      name,
+      columns,
+      primaryKey: ['id', 'valid_to'],
+      foreignKeys: {},
+      uniques: {},
+      checks: {},
+      indexes: {},
+    };
+  }
   return { tables, extensions: [...extensions].sort() };
 }
 

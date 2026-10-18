@@ -33,6 +33,8 @@ Requirements: Node.js ≥ 24, PostgreSQL ≥ 14.
 - **Odoo-ORM parity, typed and checked at startup**: module data with external ids (`record`, `ref`, `env.ref`),
   related fields, delegation (`delegates`), hierarchies (`childOf` / `parentOf`), company-dependent fields, search
   on computed fields, and roles / access / rules editable at runtime.
+- **Beyond Odoo**: compare-and-set writes against lost updates, transactional events (outbox) and PostgreSQL jobs
+  with exactly-once database effects, and time travel (`history: true`, `env.asOf(instant)`).
 - **Typed definitions**: `shutro generate` writes per-module bindings, so computes, checks, onchange handlers and
   methods are typed with no casts.
 - **Migrations**: schema diff against the live catalog, versioned migration files, destructive-change guard.

@@ -50,6 +50,8 @@ export interface TranslationScope {
   readonly source: string;
   /** The current company, for company-dependent fields. */
   readonly company?: number;
+  /** The relation a model is read from (the past in `env.asOf` scopes); the table by default. */
+  readonly from?: (model: AnyModel) => SqlFragment;
 }
 
 function column(
@@ -375,7 +377,8 @@ function relation(
   ];
   const where =
     conditions.length === 0 ? sql.empty : sql` WHERE ${sql.join(conditions, sql` AND `)}`;
-  const targets = sql`SELECT ${sql.id('id')} FROM ${sql.id(target.table)}${where}`;
+  const from = translation?.from?.(target) ?? sql.id(target.table);
+  const targets = sql`SELECT ${sql.id('id')} FROM ${from}${where}`;
   let match: SqlFragment;
   if (field.kind === 'many2one') {
     const col = sql.id(model.columns[key] ?? '');
@@ -388,7 +391,7 @@ function relation(
       target.columns[(field as { inverseField?: string }).inverseField ?? ''] ?? '',
     );
     const and = conditions.length === 0 ? sql.empty : sql` AND ${sql.join(conditions, sql` AND `)}`;
-    match = sql`SELECT ${inverse} FROM ${sql.id(target.table)} WHERE ${inverse} IS NOT NULL${and}`;
+    match = sql`SELECT ${inverse} FROM ${from} WHERE ${inverse} IS NOT NULL${and}`;
   } else {
     const j = junctionTable(model, field, target);
     match = sql`SELECT ${sql.id(j.sourceColumn)} FROM ${sql.id(j.table)} WHERE ${sql.id(j.targetColumn)} IN (${targets})`;

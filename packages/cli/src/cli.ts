@@ -4,7 +4,7 @@
  */
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createShutro, loadData } from '@shutro/core';
+import { createShutro, historyStatements, loadData } from '@shutro/core';
 import {
   applyMigrations,
   migrationStatus,
@@ -168,6 +168,8 @@ async function migrate(
         for (const m of result.modules)
           io.write(`module    ${m.module} ${m.from ?? '(new)'} → ${m.to}\n`);
         for (const h of result.hooks) io.write(`hook      ${h.module} ${h.version}\n`);
+        // History triggers (RFC 0018 §7.4): idempotent, after the schema they version.
+        for (const statement of historyStatements(registry)) await driver.query(statement);
         // Module data (RFC 0017), after the schema: idempotent, so it runs at every apply.
         const data = await loadData(createShutro({ driver, registry }));
         let dataChanges = 0;
