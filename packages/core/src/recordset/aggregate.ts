@@ -139,24 +139,15 @@ function groupOf(host: AggregateHost, model: AnyModel, name: string): Group {
     // Datetimes are bucketed in the environment's time zone: "October" is the user's October.
     const local =
       field.kind === 'datetime' ? sql`(${column} AT TIME ZONE ${host.internals.env.tz})` : column;
-    return {
-      name,
-      key,
-      field,
-      expr: sql`to_char(date_trunc(${granularity}, ${local}), 'YYYY-MM-DD')`,
-    };
+    // A date, not text: the driver reads dates as 'YYYY-MM-DD' strings, and this costs nothing per row.
+    return { name, key, field, expr: sql`date_trunc(${granularity}, ${local})::date` };
   }
   if (field.kind === 'datetime')
     invalid(
       `'${key}' is a datetime: give a granularity.`,
       `Write e.g. ${key}:day or ${key}:month.`,
     );
-  return {
-    name,
-    key,
-    field,
-    expr: field.kind === 'date' ? sql`to_char(${column}, 'YYYY-MM-DD')` : column,
-  };
+  return { name, key, field, expr: column };
 }
 
 function measureOf(model: AnyModel, name: string, spec: unknown): Measure {
