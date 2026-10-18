@@ -264,7 +264,10 @@ export async function runOnchange(
   input: OnchangeInputRaw,
 ): Promise<OnchangeResultRaw> {
   const { internals } = host;
+  // Form assistance for a record being created (no id) or edited: the same access as saving it would need, so a
+  // reader cannot run a model's onchange logic (and see its results) on records they could never save.
   assertAccess(internals, model, 'read');
+  assertAccess(internals, model, input.id === undefined || input.id === null ? 'create' : 'write');
   const warnings: string[] = [];
   const childIds = new Map<string, number[]>();
   const wasRecomputing = internals.compute.recomputing;

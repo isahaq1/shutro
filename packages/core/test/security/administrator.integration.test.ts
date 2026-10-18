@@ -377,4 +377,18 @@ describe('regressions found by Kosh', () => {
       expect(draft.values).not.toHaveProperty('cost'); // restricted to x.manager: not an AccessError, not leaked
     });
   });
+
+  test('onchange needs the access saving would need: create for a new record, write for an existing one', async () => {
+    // base.user may read and create notes, not write them.
+    await as(1, ['base.user'], async (env) => {
+      const [mine] = (await env.model('x.note').search({})).ids;
+      expect(mine).toBeDefined();
+      await expect(
+        env.model('x.note').onchange({ values: { body: 'new' }, changed: ['body'] }),
+      ).resolves.toBeDefined();
+      await expect(
+        env.model('x.note').onchange({ id: mine, values: { body: 'edit' }, changed: ['body'] }),
+      ).rejects.toBeInstanceOf(AccessError);
+    });
+  });
 });
