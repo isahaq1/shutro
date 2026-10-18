@@ -8,7 +8,7 @@ import type { ScopeInternals } from '../env/env.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { type ComputeHost, computeFields } from './compute.js';
-import { assertAccess } from './security.js';
+import { assertAccess, canField } from './security.js';
 import { fail, normalize, type TranslationContext } from './values.js';
 
 /** What the draft runtime needs from the recordset runtime. */
@@ -280,7 +280,10 @@ export async function runOnchange(
       for (const id of ids) created.push({ model: target, id });
     }
     const values = host.values(model.name, vid) as Map<string, unknown>;
-    const keys = scalarKeys(model).filter((k) => k !== 'id');
+    // Only fields the user may read come back (and are compared): restricted ones stay out of the draft's result.
+    const keys = scalarKeys(model).filter(
+      (k) => k !== 'id' && canField(internals, model, k, 'read'),
+    );
     // Loads nothing (every column is in the cache) but brings the currency / unit objects the reads need.
     await host.load(model, [vid], {
       fields: new Set(keys.filter((k) => model.columns[k] !== undefined)),
@@ -330,7 +333,9 @@ export async function runOnchange(
       const target = internals.registry.get(
         (model.fields[key] as { target?: string }).target ?? '',
       ).model;
-      const childKeys = scalarKeys(target).filter((k) => k !== 'id');
+      const childKeys = scalarKeys(target).filter(
+        (k) => k !== 'id' && canField(internals, target, k, 'read'),
+      );
       await host.load(target, ids, { fields: columnsOf(target, childKeys), relations: new Map() });
       children[key] = host.read(target, ids, childKeys).map(({ id: _id, ...rest }) => rest);
     }

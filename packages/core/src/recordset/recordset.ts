@@ -668,7 +668,8 @@ export class RecordSetImpl {
   read(keys: readonly string[]): Record<string, unknown>[] {
     return [...this].map((r) => {
       const row: Record<string, unknown> = { id: r.ids[0] };
-      for (const key of keys) row[key] = plain(r.fieldValue(key), this.model.fields[key]);
+      for (const key of keys)
+        if (key !== 'id') row[key] = plain(r.fieldValue(key), this.model.fields[key]); // id is always there
       return row;
     });
   }

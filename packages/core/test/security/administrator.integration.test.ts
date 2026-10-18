@@ -365,3 +365,16 @@ describe('scoped elevation', () => {
     });
   });
 });
+
+describe('regressions found by Kosh', () => {
+  test("read(['id', ...]) works; onchange leaves out fields the user may not read", async () => {
+    await as(1, ['base.user'], async (env) => {
+      const notes = await env.model('x.note').search({ where: { body: 'alice' } });
+      expect(notes.read(['id', 'body'])).toEqual([{ id: notes.ids[0], body: 'alice' }]);
+      const draft = await env
+        .model('x.note')
+        .onchange({ values: { body: 'draft' }, changed: ['body'] });
+      expect(draft.values).not.toHaveProperty('cost'); // restricted to x.manager: not an AccessError, not leaked
+    });
+  });
+});
