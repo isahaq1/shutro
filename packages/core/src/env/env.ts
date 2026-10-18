@@ -54,6 +54,7 @@ import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ListLoaded, ModelName, ModelRef, RecordSet } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
 import {
+  administratorCodes,
   changeStatement,
   closureWith,
   isAdministratorWith,
@@ -384,6 +385,11 @@ export class Env<S = unknown> {
     has(code: string): boolean;
     /** @throws {AccessError} unless {@link has}. */
     require(code: string): void;
+    /**
+     * The group and role codes that make their holder an administrator (an administrator group, or implying one),
+     * from code and runtime roles: what sign-in, 2FA policy and "keep one administrator" checks look for.
+     */
+    administratorGroups(): ReadonlySet<string>;
   } {
     const scope = internalsOf(this as unknown as Env);
     return {
@@ -395,6 +401,7 @@ export class Env<S = unknown> {
       require: (code) => {
         assertPermission(scope, code);
       },
+      administratorGroups: () => administratorCodes(scope.registry, scope.overlay),
     };
   }
 
@@ -453,6 +460,14 @@ export class Env<S = unknown> {
       deleteRule: (name) => apply({ kind: 'deleteRule', name }),
       grantPermission: (role, permission) => apply({ kind: 'permission', role, permission }),
       revokePermission: (role, permission) => apply({ kind: 'revokePermission', role, permission }),
+      setFieldGroups: (model, field, groups) =>
+        apply({
+          kind: 'fields',
+          model,
+          field,
+          read: [...(groups.read ?? [])],
+          write: [...(groups.write ?? [])],
+        }),
     };
   }
 
@@ -1037,6 +1052,15 @@ export interface SecurityAdmin {
   /** Grants a feature permission (declared by a module) to `role`. */
   grantPermission(role: string, permission: string): Promise<void>;
   revokePermission(role: string, permission: string): Promise<void>;
+  /**
+   * Field security at runtime: the roles that may read / write `model.field`, on top of its code groups (writers can
+   * read). A field without code groups becomes restricted to these roles; empty lists remove the runtime entry.
+   */
+  setFieldGroups(
+    model: string,
+    field: string,
+    groups: { readonly read?: readonly string[]; readonly write?: readonly string[] },
+  ): Promise<void>;
 }
 
 /** What an identity loader returns for a user. */

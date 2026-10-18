@@ -45,6 +45,7 @@ import {
   assertDomainFields,
   assertFields,
   explainDenied,
+  fieldGroupsOf,
   loadedValue,
   readableKeys,
   ruleConditions,
@@ -753,7 +754,8 @@ export class RecordSetImpl {
         `'${key}' is not a field of ${this.modelName}.`,
       );
     const internals = internalsOf(this.env);
-    if (field.groups.read.length > 0) assertFields(internals, this.model, [key], 'read');
+    if (fieldGroupsOf(internals, this.model, key).read.length > 0)
+      assertFields(internals, this.model, [key], 'read');
     const { cache } = internals;
     const values = valuesOf(cache, this.modelName, id);
     if (field.kind === 'one2many' || field.kind === 'many2many') {

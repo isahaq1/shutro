@@ -42,7 +42,7 @@ const Company = defineModel('res.company', {
 });
 const Note = defineModel('x.note', {
   access: { 'base.user': ['read'] },
-  fields: { body: f.char({ required: true }) },
+  fields: { body: f.char({ required: true }), cost: f.char() },
 });
 // No code grant at all: only runtime security opens it.
 const Secret = defineModel('x.secret', {
@@ -175,4 +175,84 @@ test('changes are validated when saved; only administrators make them', async ()
     ),
   ).rejects.toThrow(/not enabled/);
   void (0 as unknown as Id<'res.users'>);
+});
+
+test('field security at runtime: hide or lock a field for everyone but some roles', async () => {
+  const shutro = app();
+  await driver.query(compile(sql`INSERT INTO x_note (body, cost) VALUES (${'memo'}, ${'100'})`));
+  const asUser = (groups: string[]) =>
+    shutro.run({ user: 1, company: 1, groups }, async (env) => ({
+      read: env.access.canField('x.note', 'cost', 'read'),
+      writeBody: env.access.canField('x.note', 'body', 'write'),
+      cost: await (await env.model('x.note').search({}))
+        .load(['cost'])
+        .then((r) => r.mapped('cost'))
+        .catch((e: unknown) => (e instanceof AccessError ? 'denied' : e)),
+      filter: await env
+        .model('x.note')
+        .search({ where: { cost: '100' } })
+        .then((r) => r.length)
+        .catch((e: unknown) => (e instanceof AccessError ? 'denied' : e)),
+      body: (await (await env.model('x.note').search({})).load(['body'])).mapped('body'),
+    }));
+  expect(await asUser(['base.user'])).toMatchObject({ read: true, cost: ['100'], filter: 1 });
+
+  await shutro.run({ user: 3, company: 1, groups: ['base.admin'] }, async (env) => {
+    await env.securityAdmin.saveRole({
+      code: 'x.finance',
+      label: 'Finance',
+      implies: ['base.user'],
+    });
+    await env.securityAdmin.setFieldGroups('x.note', 'cost', { read: ['x.finance'] });
+    await env.securityAdmin.setFieldGroups('x.note', 'body', { write: ['x.finance'] });
+  });
+  // Hidden from plain users (also as a filter: matching would leak it); read-only body.
+  expect(await asUser(['base.user'])).toEqual({
+    read: false,
+    writeBody: false,
+    cost: 'denied',
+    filter: 'denied',
+    body: ['memo'],
+  });
+  expect(await asUser(['x.finance'])).toEqual({
+    read: true,
+    writeBody: true,
+    cost: ['100'],
+    filter: 1,
+    body: ['memo'],
+  });
+
+  // A role in use by field security cannot be deleted (that would change who sees the field).
+  await expect(
+    shutro.run({ user: 3, company: 1, groups: ['base.admin'] }, (env) =>
+      env.securityAdmin.deleteRole('x.finance'),
+    ),
+  ).rejects.toBeInstanceOf(InvalidModuleError);
+  await expect(
+    shutro.run({ user: 3, company: 1, groups: ['base.admin'] }, (env) =>
+      env.securityAdmin.setFieldGroups('x.note', 'nope', { read: ['x.finance'] }),
+    ),
+  ).rejects.toBeInstanceOf(InvalidModuleError);
+  await shutro.run({ user: 3, company: 1, groups: ['base.admin'] }, async (env) => {
+    await env.securityAdmin.setFieldGroups('x.note', 'cost', {});
+    await env.securityAdmin.setFieldGroups('x.note', 'body', {});
+    await env.securityAdmin.deleteRole('x.finance');
+  });
+  expect(await asUser(['base.user'])).toMatchObject({ read: true, writeBody: true, cost: ['100'] });
+});
+
+test('administratorGroups: code administrator groups and runtime roles that are or imply one', async () => {
+  const shutro = app();
+  await shutro.run({ user: 3, company: 1, groups: ['base.admin'] }, async (env) => {
+    await env.securityAdmin.saveRole({ code: 'x.boss', label: 'Boss', implies: ['base.admin'] });
+    await env.securityAdmin.saveRole({ code: 'x.root', label: 'Root', administrator: true });
+    await env.securityAdmin.saveRole({ code: 'x.clerk', label: 'Clerk', implies: ['base.user'] });
+  });
+  const codes = await shutro.run({ user: 1, company: 1, groups: ['base.user'] }, async (env) => [
+    ...env.access.administratorGroups(),
+  ]);
+  expect(codes.sort()).toEqual(['base.admin', 'x.boss', 'x.root']);
+  await shutro.run({ user: 3, company: 1, groups: ['base.admin'] }, async (env) => {
+    for (const code of ['x.boss', 'x.root', 'x.clerk']) await env.securityAdmin.deleteRole(code);
+  });
 });

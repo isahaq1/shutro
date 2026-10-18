@@ -6,6 +6,7 @@
  */
 import type { Driver } from '@shutro/driver-pg';
 import {
+  type FieldGroups,
   GROUP_CODE,
   type Perm,
   type RulePerm,
@@ -28,6 +29,7 @@ const DDL = [
   'CREATE TABLE IF NOT EXISTS "shutro_role_access" ("role" text NOT NULL, "model" text NOT NULL, "perms" text[] NOT NULL, PRIMARY KEY ("role", "model"))',
   'CREATE TABLE IF NOT EXISTS "shutro_role_rule" ("name" text PRIMARY KEY, "role" text NOT NULL, "model" text NOT NULL, "perms" text[] NOT NULL, "domain" jsonb NOT NULL)',
   'CREATE TABLE IF NOT EXISTS "shutro_role_permission" ("role" text NOT NULL, "permission" text NOT NULL, PRIMARY KEY ("role", "permission"))',
+  `CREATE TABLE IF NOT EXISTS "shutro_role_field" ("model" text NOT NULL, "field" text NOT NULL, "read" text[] NOT NULL DEFAULT '{}', "write" text[] NOT NULL DEFAULT '{}', PRIMARY KEY ("model", "field"))`,
 ];
 
 /** A role defined at runtime. */
@@ -56,6 +58,8 @@ export interface RuntimeSecurity {
   readonly rules: ReadonlyMap<string, Readonly<Record<string, RuleSpec>>>;
   /** feature permission → roles granted it. */
   readonly permissions: ReadonlyMap<string, ReadonlySet<string>>;
+  /** model → field → the roles that may read / write it (in addition to the field's code groups). */
+  readonly fields: ReadonlyMap<string, ReadonlyMap<string, FieldGroups>>;
 }
 
 /** Statements creating the runtime security tables. */
@@ -96,6 +100,24 @@ export async function loadRuntimeSecurity(driver: Pick<Driver, 'query'>): Promis
     text: 'SELECT role, permission FROM shutro_role_permission',
     params: [],
   });
+  const fieldRows = await driver.query<{
+    model: string;
+    field: string;
+    read: string[];
+    write: string[];
+  }>({
+    text: 'SELECT model, field, read, write FROM shutro_role_field',
+    params: [],
+  });
+  const fieldMap = new Map<string, Map<string, FieldGroups>>();
+  for (const f of fieldRows) {
+    const byField = fieldMap.get(f.model) ?? new Map<string, FieldGroups>();
+    // Writers can read: when reading is restricted, the roles allowed to write are allowed to read. An empty read
+    // list leaves reading open (`{ write: [...] }` makes the field read-only for everyone else).
+    const read = Object.freeze(f.read.length === 0 ? [] : [...new Set([...f.read, ...f.write])]);
+    byField.set(f.field, Object.freeze({ read, write: Object.freeze([...f.write]) }));
+    fieldMap.set(f.model, byField);
+  }
   const accessMap = new Map<string, Map<string, Set<Perm>>>();
   for (const a of access) {
     const byRole = accessMap.get(a.model) ?? new Map<string, Set<Perm>>();
@@ -122,7 +144,42 @@ export async function loadRuntimeSecurity(driver: Pick<Driver, 'query'>): Promis
     access: accessMap,
     rules: ruleMap,
     permissions: permissionMap,
+    fields: fieldMap,
   });
+}
+
+/**
+ * The groups of a field with the runtime overlay (RFC 0014 §7.10): the code groups plus the roles given in the
+ * overlay. A field without code groups that gets runtime roles becomes restricted to them: the one narrowing the
+ * overlay allows, so administrators can hide or lock a field without code.
+ */
+export function effectiveFieldGroups(
+  overlay: RuntimeSecurity | undefined,
+  model: string,
+  field: string,
+  code: FieldGroups,
+): FieldGroups {
+  const extra = overlay?.fields.get(model)?.get(field);
+  if (extra === undefined) return code;
+  const merge = (a: readonly string[], b: readonly string[]): readonly string[] =>
+    b.length === 0 ? a : Object.freeze([...new Set([...a, ...b])]);
+  return Object.freeze({
+    read: merge(code.read, extra.read),
+    write: merge(code.write, extra.write),
+  });
+}
+
+/** The codes (code groups and runtime roles) whose closure includes an administrator group. */
+export function administratorCodes(
+  registry: Registry,
+  overlay: RuntimeSecurity | undefined,
+): ReadonlySet<string> {
+  const codes = [...registry.security.groups.keys(), ...(overlay?.roles.keys() ?? [])];
+  return new Set(
+    codes.filter((code) =>
+      isAdministratorWith(registry, overlay, closureWith(registry, overlay, [code])),
+    ),
+  );
 }
 
 /** The closure of `codes` over `implies`, code groups and runtime roles together. */
@@ -224,6 +281,30 @@ export function validateChange(
       );
       return;
     }
+    case 'deleteRole': {
+      for (const [model, byField] of overlay.fields)
+        for (const [field, groups] of byField)
+          if (groups.read.includes(change.code) || groups.write.includes(change.code))
+            invalid(
+              `The role '${change.code}' is used by the field security of ${model}.${field}.`,
+              'Remove it from that field first (setFieldGroups): deleting it would change who sees the field.',
+            );
+      return;
+    }
+    case 'fields': {
+      if (!registry.has(change.model))
+        invalid(`The model '${change.model}' is not installed.`, 'Check the model name.');
+      const field = registry.get(change.model).model.fields[change.field];
+      if (field === undefined)
+        invalid(`${change.model} has no field '${change.field}'.`, 'Check the field name.');
+      if (change.field === 'id')
+        invalid(
+          'The id field cannot be restricted.',
+          'Restrict other fields, or the model access.',
+        );
+      for (const role of [...change.read, ...change.write]) knownRole(registry, overlay, role);
+      return;
+    }
     case 'permission': {
       knownRole(registry, overlay, change.role);
       if (!registry.security.permissions.has(change.permission))
@@ -264,7 +345,14 @@ export type SecurityChange =
     }
   | { readonly kind: 'deleteRule'; readonly name: string }
   | { readonly kind: 'permission'; readonly role: string; readonly permission: string }
-  | { readonly kind: 'revokePermission'; readonly role: string; readonly permission: string };
+  | { readonly kind: 'revokePermission'; readonly role: string; readonly permission: string }
+  | {
+      readonly kind: 'fields';
+      readonly model: string;
+      readonly field: string;
+      readonly read: readonly string[];
+      readonly write: readonly string[];
+    };
 
 /** The statement that applies a validated change. */
 export function changeStatement(change: SecurityChange): ReturnType<typeof compile> {
@@ -303,5 +391,14 @@ export function changeStatement(change: SecurityChange): ReturnType<typeof compi
       return compile(
         sql`DELETE FROM shutro_role_permission WHERE role = ${change.role} AND permission = ${change.permission}`,
       );
+    case 'fields':
+      return change.read.length === 0 && change.write.length === 0
+        ? compile(
+            sql`DELETE FROM shutro_role_field WHERE model = ${change.model} AND field = ${change.field}`,
+          )
+        : compile(
+            sql`INSERT INTO shutro_role_field (model, field, read, write) VALUES (${change.model}, ${change.field}, ${sql.array([...change.read], 'text')}, ${sql.array([...change.write], 'text')})
+                ON CONFLICT (model, field) DO UPDATE SET read = EXCLUDED.read, write = EXCLUDED.write`,
+          );
   }
 }

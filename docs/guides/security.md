@@ -135,6 +135,23 @@ await shutro.run({ user: adminId, company: 1, groups: ['base.admin'] }, async (e
   using `runtimeSecurity` reloads. Assign runtime roles to users like any group (identity loader / `groups`).
 - Runtime rules apply in the ORM; generated RLS policies cover the code's rules only.
 
+### Field security at runtime
+
+```ts
+await admin.setFieldGroups('hr.employee', 'salary', { read: ['hr.manager'] });  // hidden from everyone else
+await admin.setFieldGroups('sale.order', 'discount', { write: ['sale.team_lead'] }); // read-only for everyone else
+await admin.setFieldGroups('hr.employee', 'salary', {});                        // removes the runtime entry
+```
+
+The roles are added to the field's code groups (writers can read whenever reading is restricted). A field without
+code groups becomes restricted to the given roles: the one narrowing runtime security allows, so administrators can
+hide or lock a field without code. It applies everywhere `groups` on a field does (reads, writes, filters, grouping,
+onchange, `canField`). A role still used by field security cannot be deleted.
+
+`env.access.administratorGroups()` returns the codes that make their holder an administrator (administrator groups,
+runtime administrator roles, and roles implying either): for sign-in policies such as mandatory 2FA, and for
+"keep at least one administrator" checks.
+
 ## Back-dated entries
 
 ```ts

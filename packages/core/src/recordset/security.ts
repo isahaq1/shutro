@@ -10,6 +10,7 @@ import {
   decrypt,
   EncryptionError,
   encrypt,
+  type FieldGroups,
   fieldAllowed,
   type Perm,
   type RulePerm,
@@ -22,6 +23,7 @@ import { calendarDateIn } from '../env/time.js';
 import { AccessError, MissingRecordError } from '../errors.js';
 import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
+import { effectiveFieldGroups } from '../security/runtime.js';
 import { compileDomain } from './domain.js';
 import { sourceOf } from './source.js';
 import { bindValue } from './values.js';
@@ -119,6 +121,17 @@ export function assertBackdate(
   });
 }
 
+/** The groups of a field: its code groups plus the runtime field security (RFC 0014 §7.10). */
+export function fieldGroupsOf(
+  internals: ScopeInternals,
+  model: AnyModel,
+  key: string,
+): FieldGroups {
+  const field = model.fields[key];
+  const code = field?.groups ?? { read: [], write: [] };
+  return effectiveFieldGroups(internals.overlay, model.name, key, code);
+}
+
 /** True when the field may be read / written by the environment. */
 export function canField(
   internals: ScopeInternals,
@@ -134,7 +147,7 @@ export function canField(
     !internals.registry.security.enforce
   )
     return true;
-  if (fieldAllowed(field.groups, internals.env.groups, kind)) return true;
+  if (fieldAllowed(fieldGroupsOf(internals, model, key), internals.env.groups, kind)) return true;
   if (internals.registry.security.mode !== 'warn') return false;
   internals.registry.security.denied(
     `[enforce: 'warn'] ${kind} of ${model.name}.${key} would be denied for groups ${[...internals.env.groups].join(', ') || '(none)'}.`,
@@ -153,7 +166,7 @@ export function assertFields(
     if (canField(internals, model, key, kind)) continue;
     throw new AccessError(model.name, kind, {
       field: key,
-      problem: `field '${key}' of ${model.name} is restricted to groups ${(kind === 'read' ? model.fields[key]?.groups.read : model.fields[key]?.groups.write)?.join(', ') ?? ''}.`,
+      problem: `field '${key}' of ${model.name} is restricted to groups ${fieldGroupsOf(internals, model, key)[kind].join(', ')}.`,
       hint: HINT,
     });
   }
