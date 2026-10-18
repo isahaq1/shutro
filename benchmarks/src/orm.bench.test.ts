@@ -216,11 +216,13 @@ afterAll(async () => {
 
 describe(`ORM benchmarks (${ORDERS} orders × ${LINES} lines)`, () => {
   test('create: orders with lines through INSERT … unnest, computes and audit at the flush', async () => {
-    // Orders and their lines in one INSERT each per 1,000 rows (nested creates are batched across parents).
+    // Orders and their lines in one INSERT each per 1,000 rows (nested creates are batched across parents), and the
+    // computed subtotals / totals written back in one UPDATE per 1,000 rows of each model.
+    const batches = Math.ceil(ORDERS / 1000) + Math.ceil((ORDERS * LINES) / 1000);
     const r = await measure(
       'create (unnest)',
       ORDERS * (LINES + 1),
-      Math.ceil((ORDERS * (LINES + 1)) / 1000) + 20,
+      2 * batches + 5,
       async (env) => {
         await env.model('sale.order').create(orders('U'));
       },
