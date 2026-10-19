@@ -216,20 +216,6 @@ export function assertDomainFields(
   }
 }
 
-/** The field keys a domain mentions (through `or` / `and` / `not`). */
-export function domainKeys(domain: unknown, out: Set<string> = new Set()): Set<string> {
-  if (Array.isArray(domain)) {
-    for (const d of domain) domainKeys(d, out);
-    return out;
-  }
-  if (typeof domain !== 'object' || domain === null) return out;
-  for (const [key, value] of Object.entries(domain)) {
-    if (key === 'or' || key === 'and' || key === 'not') domainKeys(value, out);
-    else out.add(key);
-  }
-  return out;
-}
-
 /** Record-rule conditions for `perm` (RFC 0014 §7.3): globals ANDed, applicable group rules ORed. Empty under `su`. */
 export function ruleConditions(
   internals: ScopeInternals,
@@ -270,11 +256,6 @@ export function ruleConditions(
     out.push(sql`(${sql.join(alternatives, sql` OR `)})`);
   }
   return out;
-}
-
-/** True when `perm` has rules for the model that apply to this environment. */
-export function hasRules(internals: ScopeInternals, model: AnyModel, perm: RulePerm): boolean {
-  return ruleConditions(internals, model, perm).length > 0;
 }
 
 /**

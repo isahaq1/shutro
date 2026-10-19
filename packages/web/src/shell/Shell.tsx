@@ -36,11 +36,6 @@ import {
   useTheme,
 } from '../session.js';
 
-/** The app a model belongs to in the menus. */
-export function appOfModel(meta: Meta, model: string): string {
-  return meta.menus.find((m) => m.models.some((x) => x.model === model))?.app ?? 'settings';
-}
-
 export function Shell() {
   const { meta, error } = useSessionMeta();
   const navigate = useNavigate();

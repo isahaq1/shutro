@@ -16,10 +16,10 @@ function nf(locale: string, options: Intl.NumberFormatOptions): Intl.NumberForma
 }
 
 /** `en_US` → `en-US`. */
-export const locale = (lang: string): string => lang.replace('_', '-');
+const locale = (lang: string): string => lang.replace('_', '-');
 
 /** A decimal string formatted exactly (Intl treats strings as exact decimals). */
-export function decimal(value: string, lang: string, places?: number): string {
+function decimal(value: string, lang: string, places?: number): string {
   const f = nf(
     locale(lang),
     places === undefined
@@ -29,7 +29,7 @@ export function decimal(value: string, lang: string, places?: number): string {
   return f.format(value as unknown as number); // a string: formatted exactly, not converted
 }
 
-export interface MoneyValue {
+interface MoneyValue {
   readonly amount: string;
   readonly currency: string;
 }
@@ -37,7 +37,7 @@ export interface MoneyValue {
 export const isMoney = (v: unknown): v is MoneyValue =>
   typeof v === 'object' && v !== null && 'amount' in v && 'currency' in v;
 
-export function money(value: MoneyValue, lang: string): string {
+function money(value: MoneyValue, lang: string): string {
   try {
     return nf(locale(lang), { style: 'currency', currency: value.currency }).format(
       value.amount as unknown as number,
@@ -47,7 +47,7 @@ export function money(value: MoneyValue, lang: string): string {
   }
 }
 
-export function date(value: string, lang: string): string {
+function date(value: string, lang: string): string {
   const [y, m, d] = value.slice(0, 10).split('-').map(Number);
   if (y === undefined || m === undefined || d === undefined) return value;
   return new Intl.DateTimeFormat(locale(lang), { dateStyle: 'medium', timeZone: 'UTC' }).format(
@@ -55,7 +55,7 @@ export function date(value: string, lang: string): string {
   );
 }
 
-export function datetime(value: string, lang: string, tz: string): string {
+function datetime(value: string, lang: string, tz: string): string {
   return new Intl.DateTimeFormat(locale(lang), {
     dateStyle: 'medium',
     timeStyle: 'short',

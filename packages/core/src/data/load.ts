@@ -52,7 +52,7 @@ function split(id: string): [string, string] {
 }
 
 /** The record id of external id `id` (cached per transaction). @throws {UnknownExternalIdError} */
-export async function resolveExternalId(
+async function resolveExternalId(
   internals: ScopeInternals,
   id: string,
   model?: string,

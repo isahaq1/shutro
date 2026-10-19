@@ -8,6 +8,5 @@ dist/
 .turbo/
 coverage/
 *.log
-spikes/*/gen/
 benchmarks/results.json
 dist-npm/

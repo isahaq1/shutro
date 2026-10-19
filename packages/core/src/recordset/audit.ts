@@ -57,7 +57,7 @@ export function trackedKeys(model: AnyModel): Set<string> {
 }
 
 /** The JSON form of a cached value, as `read()` would return it (RFC 0013 §7.3). */
-export function auditValue(
+function auditValue(
   internals: ScopeInternals,
   model: AnyModel,
   key: string,

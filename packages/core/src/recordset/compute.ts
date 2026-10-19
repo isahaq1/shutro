@@ -232,7 +232,7 @@ function addSibling(model: AnyModel, key: string, fields: Set<string>): void {
 }
 
 /** The load spec covering the `depends` of `fields` (RFC 0004 §7.5), plus the sibling currency / unit fields. */
-export function dependsSpec(
+function dependsSpec(
   internals: ScopeInternals,
   model: AnyModel,
   fields: readonly ComputedField[],

@@ -158,7 +158,7 @@ export async function setMembership(db: Queryable, userId: number, m: Membership
 export const LOCKOUT = { maxFailures: 5, lockMinutes: 15 } as const;
 
 /** Failed sign-ins per IP per minute, across accounts (password spraying). Successful ones never count. */
-export const IP_LIMIT = 20;
+const IP_LIMIT = 20;
 const ipFailures = new Map<string, { count: number; reset: number }>();
 
 function throttleIp(ip: string): void {
@@ -353,9 +353,4 @@ export async function switchCompany(
       sql`UPDATE "kosh_session" SET company = ${company} WHERE token_hash = ${sha256(token)}`,
     ),
   );
-}
-
-/** Test hook: forget the per-IP counters. */
-export function resetThrottle(): void {
-  ipFailures.clear();
 }

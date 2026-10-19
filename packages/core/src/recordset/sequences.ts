@@ -64,7 +64,7 @@ function groupRequests(
 }
 
 /** Allocates one formatted number per request, in one statement per (company, period) group. */
-export async function allocateNumbers(
+async function allocateNumbers(
   internals: ScopeInternals,
   definition: SequenceDefinition,
   requests: readonly { readonly company: number | null; readonly date: string }[],
@@ -98,7 +98,7 @@ export async function allocateNumbers(
 }
 
 /** Sequence fields of a model with their options. */
-export function sequenceFields(model: AnyModel): {
+function sequenceFields(model: AnyModel): {
   readonly key: string;
   readonly field: Field;
   readonly options: NonNullable<Field['sequence']>;

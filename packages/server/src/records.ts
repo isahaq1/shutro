@@ -14,7 +14,7 @@ export interface Ref {
 }
 
 /** Rows for the client: many2one ids replaced by `{ id, name }` (one name query per target model, no N+1). */
-export async function serialize(
+async function serialize(
   env: DynamicEnv,
   model: ModelMeta,
   models: Readonly<Record<string, ModelMeta>>,

@@ -2,7 +2,7 @@
 
 - **Status:** Complete (2026-10-14). **Outcome: keep the full design; the fallback is not needed.**
 - **Answers:** RFC 0004 §11 Q1 (type-system budget). Resolution recorded there: use the fallback if the full design fails.
-- **Code:** `spikes/recordset-types/` (throwaway; not a published package)
+- **Code:** removed after the decision; it is in the history at [`ffc594d:spikes/recordset-types`](https://github.com/isahaq1/shutro/tree/ffc594d/spikes/recordset-types)
 
 ## Question
 

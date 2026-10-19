@@ -111,7 +111,7 @@ function isX2Many(field: Field): boolean {
 }
 
 /** Stored, non-binary, not x2many (RFC 0004 §6.1). */
-export function defaultKeys(model: AnyModel): string[] {
+function defaultKeys(model: AnyModel): string[] {
   return Object.entries(model.fields)
     .filter(([, f]) => f.store && f.kind !== 'binary' && !isX2Many(f))
     .map(([key]) => key);
@@ -480,7 +480,7 @@ interface Pending {
 const prototypes = new WeakMap<AnyModel, typeof RecordSetImpl>();
 
 /** @internal Runtime recordset. Typed through `RecordSet` / `Rec` / `PendingSet` (types.ts). */
-export class RecordSetImpl {
+class RecordSetImpl {
   readonly env: Env;
   readonly registered: RegisteredModel;
   readonly modelName: string;

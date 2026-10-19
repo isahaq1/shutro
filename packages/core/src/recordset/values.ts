@@ -61,7 +61,7 @@ export function arrayType(field: Field): string {
 }
 
 /** The SQL cast applied to a bound value before it reaches the column (`jsonb` for json and translatable fields). */
-export function columnCast(field: Field): 'jsonb' | undefined {
+function columnCast(field: Field): 'jsonb' | undefined {
   return field.kind === 'json' || field.translate || field.companyDependent ? 'jsonb' : undefined;
 }
 

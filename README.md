@@ -95,8 +95,8 @@ pnpm build       # dist/ for each package
 node scripts/pack-npm.ts   # assemble the single `shutro` npm package in dist-npm/shutro
 ```
 
-The repository is a pnpm workspace (`packages/*`); the npm package `shutro` bundles all of them. Contribution rules
-(design first, test first, Conventional Commits) are in [`CLAUDE.md`](CLAUDE.md).
+The repository is a pnpm workspace (`packages/*`); the npm package `shutro` bundles all of them. How to contribute is in
+[`CONTRIBUTING.md`](CONTRIBUTING.md); security reports go to [`SECURITY.md`](SECURITY.md).
 
 ## Author
 

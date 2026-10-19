@@ -2,7 +2,7 @@
 
 - **Status:** Complete (2026-10-14). **Outcome: `postgres` (postgres.js), recorded in [RFC 0007](../rfcs/0007-postgresql-driver.md).**
 - **Answers:** `CLAUDE.md` tech stack ("benchmark both in Phase 1, pick one, record it in an RFC"). The decision goes into RFC 0007.
-- **Code:** `spikes/driver-bench/` (throwaway; not a published package)
+- **Code:** removed after the decision; it is in the history at [`ffc594d:spikes/driver-bench`](https://github.com/isahaq1/shutro/tree/ffc594d/spikes/driver-bench)
 
 ## Question
 
@@ -84,7 +84,7 @@ That's also the evidence for RFC 0004's set-based design: one 1,000-row statemen
 
 ### Correctness
 
-`spikes/driver-bench/test/driver.test.ts` runs against real PostgreSQL 18.6, directly and through PgBouncer.
+`spikes/driver-bench/test/driver.test.ts` (in the history at `ffc594d`) ran against real PostgreSQL 18.6, directly and through PgBouncer.
 
 | # | Check | postgres direct | postgres bouncer | pg direct | pg bouncer |
 | - | ----- | :-: | :-: | :-: | :-: |

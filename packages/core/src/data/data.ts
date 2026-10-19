@@ -96,7 +96,7 @@ export function fullId(module: string, record: DataRecord): string {
 }
 
 /** Every reference inside a value (nested commands and arrays included). */
-export function refsIn(value: unknown, out: DataRef[] = []): DataRef[] {
+function refsIn(value: unknown, out: DataRef[] = []): DataRef[] {
   if (isRef(value)) out.push(value);
   else if (Array.isArray(value)) for (const v of value) refsIn(v, out);
   else if (
