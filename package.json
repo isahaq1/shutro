@@ -23,6 +23,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "@changesets/cli": "^3.0.3",
+    "@shutro/apps": "workspace:*",
     "@shutro/audit": "workspace:*",
     "@shutro/cli": "workspace:*",
     "@shutro/core": "workspace:*",

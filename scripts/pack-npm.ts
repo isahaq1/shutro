@@ -31,6 +31,7 @@ const PACKAGES = [
   'audit',
   'core',
   'migrate',
+  'apps',
   'cli',
 ];
 const SUBPATHS: Readonly<Record<string, string>> = {
@@ -38,6 +39,7 @@ const SUBPATHS: Readonly<Record<string, string>> = {
   './sql': 'sql',
   './driver-pg': 'driver-pg',
   './migrate': 'migrate',
+  './apps': 'apps',
   './cli': 'cli',
   './security': 'security',
   './audit': 'audit',
