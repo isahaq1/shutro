@@ -1,6 +1,6 @@
 # RFC 0019: Apps, guided installer, and module install/uninstall
 
-- **Status:** Accepted (2026-10-19, recommendations in §11 adopted)
+- **Status:** Implemented (accepted 2026-10-19 with the recommendations in §11; implementation notes at the end)
 - **Date:** 2026-10-19
 - **Depends on:** 0002 (modules), 0014 (security), 0017 (module data), migrate package
 - **Answers:** RFC 0002 §11 open question 1 and §12 "runtime module install/uninstall"
@@ -391,3 +391,45 @@ step.
 7. `@shutro/apps`: `settings`, `partner`, `product`, `account`, then `sale`, `purchase`, `project`, then glue modules.
    Port `examples/erp-demo` to extend them.
 8. Docs: `docs/guides/apps.md`, then update CLAUDE.md roadmap.
+
+---
+
+## Implementation notes (2026-10-19)
+
+Where the implementation refines this RFC:
+
+1. **The engine lives in `@shutro/migrate`** as `createAppManager({ driver, modules })`, not on the Shutro instance.
+   `migrate` already owns `shutro_module` and the schema diff, and `core` cannot depend on it. Core gained the runtime
+   half: `createShutro({ catalog })`, `shutro.useRegistry()` (each scope keeps the registry it started with),
+   `env.apps.has()` / `env.apps.installed`, and `AppNotInstalledError`. `apps.attach(shutro)` follows other
+   processes through `LISTEN shutro_modules`.
+2. **Scoping the DDL (§7.5) is "the operations the change causes"** rather than `planMigration({ only })`. An install
+   runs the operations of `diff(target, live)` that are absent from `diff(installed, live)`. Drift of installed
+   modules is left alone, and extension columns, indexes and constraints are still created. Uninstall drops only
+   the indexes and constraints that become extra because of the removal.
+3. **The DDL is recorded in `shutro_module_log.plan`, not in `shutro_migration`.** Rows there would look like
+   migration files to `migrate status`. Failed operations are logged in a separate transaction after the rollback.
+4. **Module data loads inside the operation's transaction** through a driver pinned to it: its transactions become
+   savepoints. Standard sequences allocate in the same transaction during an install, so a failed install consumes no
+   numbers.
+5. **Plans are the operation run and rolled back.** `planInstall` / `planUninstall` / `planUpgrade` therefore match
+   the real run exactly, quarantine restores included. Blockers run before the plan, so a preview already fails when a
+   module refuses.
+6. **Quarantine storage:** tables move to the schema `shutro_quarantine`, and `shutro_quarantine.item` lists them.
+   Extension columns are stashed as `(id, value)` tables. Outgoing foreign keys are stored as structured data and
+   rebuilt with `sql.id()`, because no constraint text is ever pasted. Records a quarantined module created in tables
+   that stay are kept, and only a purge deletes them with the module's external ids.
+7. **App-managed projects:** `defineConfig({ install })` opts in. `shutro migrate` then uses the installed set, and a
+   config without `install` behaves as before (Option A remains a workflow). Config `modules` may name packages
+   (`'@shutro/apps'`), which may export several modules each; they resolve from the project's `node_modules`, then
+   from the CLI's own.
+8. **`env.apps.has(name)` takes a `string`.** The generated union of module names (§8) comes with the next generator
+   change.
+9. **Accounting numbering:** a sequence code is fixed per field, so invoices and bills each have a manual gapless
+   field (`invoiceNumber`, `billNumber`), and `name` is computed from the one that applies.
+10. **Found and fixed while building the apps** (docs/feedback.md F8, F9): the driver's param-in-text guard flagged
+    values equal to part of a quoted identifier (state `'purchase'` on `"purchase_order"`), and `create()` left the
+    parents' cached one2many lists stale within the transaction. Still open: a trigram index on a translated field
+    fails at DDL time (feedback #23).
+11. **Not done in this round:** porting `examples/erp-demo` onto the official apps (step 7, second sentence). The demo
+    still defines its own modules and keeps passing.

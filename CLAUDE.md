@@ -45,7 +45,8 @@ packages/
   audit/       # append-only change tracking
   sequence/    # concurrency-safe document numbering
   i18n/        # translatable JSONB fields
-  cli/         # shutro init | migrate | generate | inspect
+  apps/        # official apps: settings, account, sale, purchase, project (+ base, partner, product, glue)
+  cli/         # shutro init | doctor | apps | migrate | generate | inspect
   testing/     # test helpers, Testcontainers setup, factories
 examples/
   erp-demo/    # real ERP modules (partner, product, sale, invoice) used as integration tests
@@ -201,3 +202,11 @@ await shutro.run({ user, company }, async (env) => {
 
 ### Phase 6 — Proof
 - [x] `examples/erp-demo`: partner, product, sale, invoice modules built on Shutro (pain points in docs/feedback.md)
+
+### Phase 7 — Apps (RFC 0019)
+- [x] App metadata on modules (application, autoInstall, required, SVG icon, glyph, category, summary, uninstall blockers)
+- [x] Installed set per database: `createAppManager` with atomic install / uninstall / upgrade / purge, quarantine and restore, operation log; `env.apps`, `AppNotInstalledError`, `useRegistry`, `attach`
+- [x] Official apps (`@shutro/apps`): Settings, Accounting (invoices, bills, payments), Sales, Purchase, Project, and glue modules
+- [x] CLI: guided `shutro init` (default apps), `shutro apps *`, `shutro doctor`; fancy / plain / JSON output
+- [ ] Port `examples/erp-demo` onto the official apps
+- [ ] Generated union of module names for `env.apps.has()`

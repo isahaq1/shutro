@@ -38,14 +38,21 @@ Requirements: Node.js ≥ 24, PostgreSQL ≥ 14.
 - **Typed definitions**: `shutro generate` writes per-module bindings, so computes, checks, onchange handlers and
   methods are typed with no casts.
 - **Migrations**: schema diff against the live catalog, versioned migration files, destructive-change guard.
-- **Tooling**: `shutro init | migrate | generate | inspect`, dev-mode query inspector with N+1 warnings, COPY bulk
-  loads, partitioned tables, CI benchmarks.
+- **Apps**: Settings, Accounting, Sales, Purchase and Project out of the box. Install and uninstall apps at runtime
+  in one transaction each; an uninstalled app's data is kept in quarantine for 30 days and comes back on reinstall
+  ([guide](docs/guides/apps.md)).
+- **Tooling**: `shutro init | doctor | apps | migrate | generate | inspect`, dev-mode query inspector with N+1
+  warnings, COPY bulk loads, partitioned tables, CI benchmarks.
 
 ## Quick start
 
 ```sh
-npx shutro init
+npx shutro init my-erp      # asks a few questions, creates the database, installs the five default apps
+cd my-erp && npm install
+npx shutro apps             # what is installed; "shutro apps install | uninstall <app>" changes it
 ```
+
+Or use the ORM alone (`npx shutro init --minimal`):
 
 ```ts
 import { buildRegistry, createShutro, defineModel, defineModule, f } from 'shutro';
@@ -65,7 +72,7 @@ await shutro.run({ user: 1, company: 1, groups: ['base.user'] }, async (env) => 
 });
 ```
 
-Entry points: `shutro` (core), `shutro/sql`, `shutro/driver-pg`, `shutro/migrate`, `shutro/cli`, `shutro/security`,
+Entry points: `shutro` (core), `shutro/sql`, `shutro/driver-pg`, `shutro/migrate`, `shutro/apps`, `shutro/cli`, `shutro/security`,
 `shutro/audit`, `shutro/sequence`, `shutro/i18n`.
 
 ## Documentation

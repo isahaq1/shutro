@@ -34,6 +34,7 @@ product, sale, invoice) with no casts in its modules, CI benchmarks with query b
 | **Integration events** | No outbox: webhooks fire for rolled-back transactions or get lost after commit; `bus.bus` is for the UI. | `env.emit()` in the business transaction; ordered, at-least-once subscribers whose cursor advances in the handler's transaction (exactly-once database effects), retries, dead letters, NOTIFY wake-up. |
 | **Background jobs** | Crons in core; the community `queue_job` module for queues. | `env.enqueue()` with run-at, dedup keys, retries and backoff; `SKIP LOCKED` workers in any number of processes; a job's work and its completion commit together; it runs as the enqueuing user under their rules. |
 | **History** | Chatter tracking for some fields; no way to query the past. | `history: true` versions every row (raw SQL included); `env.asOf(instant)` searches, loads and aggregates the model as it was, with today's security. |
+| **App install / uninstall** | Modules commit one by one, so a failed install leaves modules stuck in `to install`; uninstall drops tables and columns with no preview and no undo. | Install, uninstall and upgrade run in one transaction each (schema, data and state together); the plan is the operation rolled back; uninstall previews row counts, honours module blockers, and keeps the data in quarantine for 30 days so a reinstall restores it; every operation is logged; guided `shutro init` and `shutro apps` with plain / JSON output for CI. |
 | **Feature parity, typed** | `related`, `_inherits`, `parent_path` / `child_of`, `company_dependent`, `search=`. | `related()` (stored or not, writable), `delegates`, `hierarchy` with `childOf` / `parentOf`, `companyDependent`, `search(operator, value)`: same capabilities, with kinds, paths and declarations checked at startup. |
 
 ## Where Odoo is ahead
@@ -44,6 +45,9 @@ Be clear about these before choosing:
   its API may still change, and it has no production history.
 - **Platform.** Views, the web client, QWeb reports, the mail / activity / chatter framework, cron and job queues,
   import / export UI, website and portal. Shutro provides the data layer for them (Kosh), not the features.
+- **Breadth of apps.** Odoo's Accounting has a double-entry ledger, reconciliation, reports and country charts of
+  accounts, and dozens of other apps exist (Inventory, HR, POS, …). Shutro's official apps (Settings, Accounting,
+  Sales, Purchase, Project) cover the core flows only: orders, invoices, bills, payments and tasks.
 - **Lazy recompute on read.** Odoo recomputes a pending stored field when it is read. Shutro's field reads are
   synchronous, so after a write a dependent stored field is fresh after `await env.flush()` or a `load()`; reading it
   earlier throws instead of returning a stale value.

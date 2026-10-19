@@ -57,6 +57,20 @@ transaction now: hydration only fills keys that are not cached.
 `taxAmount`, and the re-trigger was then suppressed as "just computed". Invoices had no tax. A shared group now runs
 at the highest rank among its fields.
 
+### F8 — The param-in-text guard rejected values that are part of a table name
+`bug` · S1 · fixed in `99c5d2e` (found while building the official apps)
+
+Confirming a purchase order wrote `state = 'purchase'` to `"purchase_order"`, and the driver's dev-mode guard reported
+the parameter as concatenated SQL, so Purchase could not be used at all. The guard now ignores quoted identifiers
+(they come from `sql.id()`, which validates them) and still catches values pasted anywhere else.
+
+### F9 — `create()` left the parents' cached one2many lists stale
+`bug` · S1 · fixed in `5486acd` (found while building the official apps)
+
+A payment created for an invoice whose `payments` list was already cached (the invoice's compute had read it when it
+was posted) was invisible to the recompute in the same transaction, so the invoice stayed "not paid". `create()` now
+drops the new records' parents' cached child lists, as `write()` already did.
+
 ---
 
 ## Open
@@ -267,3 +281,13 @@ A many2one into a partitioned model is a build error (the FK would need the part
 
 **Proposal:** allow references without a database foreign key (`f.many2one(target, { foreignKey: false })`), checked by
 the ORM.
+
+### #23 — A trigram index on a translated field fails at DDL time
+`bug` · S3 · open (found while building the official apps)
+
+`f.char({ translate: true, index: 'trigram' })` builds a registry, but the migration fails: the column is `jsonb` and
+`gin_trgm_ops` only takes text (`operator class "gin_trgm_ops" does not accept data type jsonb`). The official
+`product.product.name` has no index because of it.
+
+**Proposal:** reject the combination in `defineModel` with a hint, or index the source language,
+`USING gin ((name->>'en_US') gin_trgm_ops)`, which matches the `COALESCE(col->>lang, col->>source)` searches.

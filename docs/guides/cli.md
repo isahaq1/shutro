@@ -3,7 +3,10 @@
 ## `shutro`
 
 ```
-shutro init [dir]                        config, a base module (users, currencies, companies, groups), migrations/
+shutro init [dir]                        guided setup: files, database, default apps, company, admin (guide: apps.md)
+shutro init --minimal [dir]              config, a base module (users, currencies, companies, groups), migrations/
+shutro doctor                            Node, config, type views, PostgreSQL, extensions, migrations, apps
+shutro apps [list|info|install|uninstall|upgrade|purge]   the app lifecycle (guide: apps.md)
 shutro generate [--check]                per-module and application type views (guide: generate.md)
 shutro migrate status                    applied and pending migration files
 shutro migrate plan                      what the database is missing; destructive statements are marked
@@ -28,7 +31,12 @@ every field with its kind, column, origin module and flags (required, computed, 
 groups), each method's override chain (`confirm: sale → sale_stock(override)`), computed fields with rank and
 dependencies, constraints, access and record rules — what Odoo developers hunt for across modules.
 
-Exit codes: 0 success, 1 failure (including `generate --check` with stale files), 2 usage or configuration errors.
+Output: glyphs, colors and live progress on a terminal; plain ASCII without one or with `NO_COLOR`; `--json` prints
+one JSON object per line. Without a terminal nothing waits for input: defaults apply, and changes that remove data
+need `--yes`.
+
+Exit codes: 0 success, 1 failure (including `generate --check` with stale files, a cancelled confirmation and a
+failed `doctor` check), 2 usage or configuration errors.
 The module files are imported at runtime; with `./x.js` specifiers between TypeScript sources, run the CLI through a
 loader (`node --import tsx node_modules/.bin/shutro ...`).
 
