@@ -31,7 +31,6 @@
     "@shutro/i18n": "workspace:*",
     "@shutro/migrate": "workspace:*",
     "@shutro/security": "workspace:*",
-    "@shutro/server": "workspace:*",
     "@shutro/sequence": "workspace:*",
     "@shutro/sql": "workspace:*",
     "@shutro/testing": "workspace:*",
