@@ -48,6 +48,8 @@ describe('shutro', () => {
   test('a missing config is reported with a hint', async () => {
     const o = io();
     expect(await runCli(['generate', '--config', 'nope.config.ts'], o)).toBe(2);
-    expect(o.err.join('')).toContain('Run "shutro init" to create a project, or create shutro.config.ts');
+    expect(o.err.join('')).toContain(
+      'Run "shutro init" to create a project, or create shutro.config.ts',
+    );
   });
 });
