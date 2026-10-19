@@ -6,7 +6,7 @@
  * Imports between workspace packages (`@shutro/core`, …) are rewritten to relative paths, the CLI's emitted
  * specifiers become `shutro` / `shutro/cli`, and source maps are dropped (they point at sources not shipped).
  *
- * Usage: node scripts/pack-npm.ts [version] (default: the version being released, 0.2.0)
+ * Usage: node scripts/pack-npm.ts [version] (default: the version being released, 0.2.1)
  */
 import {
   cpSync,
@@ -57,7 +57,7 @@ function manifest(name: string): { version?: string; dependencies?: Record<strin
   return JSON.parse(readFileSync(join(ROOT, 'packages', name, 'package.json'), 'utf8'));
 }
 
-const version = process.argv[2] ?? '0.2.0';
+const version = process.argv[2] ?? '0.2.1';
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
