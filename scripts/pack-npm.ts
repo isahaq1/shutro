@@ -31,7 +31,6 @@ const PACKAGES = [
   'audit',
   'core',
   'migrate',
-  'apps',
   'cli',
 ];
 const SUBPATHS: Readonly<Record<string, string>> = {
@@ -39,7 +38,6 @@ const SUBPATHS: Readonly<Record<string, string>> = {
   './sql': 'sql',
   './driver-pg': 'driver-pg',
   './migrate': 'migrate',
-  './apps': 'apps',
   './cli': 'cli',
   './security': 'security',
   './audit': 'audit',
@@ -98,8 +96,7 @@ for (const ext of ['js', 'd.ts']) {
   const file = join(OUT, 'dist', 'cli', `packages.${ext}`);
   const text = readFileSync(file, 'utf8')
     .replace(/(CORE_PACKAGE[^=]*=\s*)'@shutro\/core'/, "$1'shutro'")
-    .replace(/(CLI_PACKAGE[^=]*=\s*)'@shutro\/cli'/, "$1'shutro/cli'")
-    .replace(/(APPS_PACKAGE[^=]*=\s*)'@shutro\/apps'/, "$1'shutro/apps'");
+    .replace(/(CLI_PACKAGE[^=]*=\s*)'@shutro\/cli'/, "$1'shutro/cli'");
   writeFileSync(file, text);
 }
 

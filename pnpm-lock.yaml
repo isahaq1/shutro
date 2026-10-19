@@ -14,9 +14,6 @@ importers:
       '@changesets/cli':
         specifier: ^3.0.3
         version: 3.0.3
-      '@shutro/apps':
-        specifier: workspace:*
-        version: link:packages/apps
       '@shutro/audit':
         specifier: workspace:*
         version: link:packages/audit
@@ -74,47 +71,6 @@ importers:
       '@shutro/testing':
         specifier: workspace:*
         version: link:../packages/testing
-
-  examples/erp-demo:
-    dependencies:
-      '@shutro/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
-      '@shutro/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@shutro/driver-pg':
-        specifier: workspace:*
-        version: link:../../packages/driver-pg
-      '@shutro/migrate':
-        specifier: workspace:*
-        version: link:../../packages/migrate
-      '@shutro/sql':
-        specifier: workspace:*
-        version: link:../../packages/sql
-    devDependencies:
-      '@shutro/testing':
-        specifier: workspace:*
-        version: link:../../packages/testing
-
-  packages/apps:
-    dependencies:
-      '@shutro/core':
-        specifier: workspace:*
-        version: link:../core
-      '@shutro/sql':
-        specifier: workspace:*
-        version: link:../sql
-    devDependencies:
-      '@shutro/driver-pg':
-        specifier: workspace:*
-        version: link:../driver-pg
-      '@shutro/migrate':
-        specifier: workspace:*
-        version: link:../migrate
-      '@shutro/testing':
-        specifier: workspace:*
-        version: link:../testing
 
   packages/audit:
     dependencies:

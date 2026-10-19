@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 const packages = [
-  'apps',
   'audit',
   'cli',
   'core',

@@ -1,6 +1,5 @@
 packages:
   - packages/*
-  - examples/*
   - benchmarks
 
 # Dependency install scripts are denied unless listed as true here (pnpm 11).

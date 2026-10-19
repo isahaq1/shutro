@@ -1,6 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "isolatedDeclarations": false },
-  "include": ["src", "src/*/.shutro"],
-  "exclude": ["src/**/*.test.ts"]
-}
