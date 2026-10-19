@@ -16,6 +16,7 @@ import {
 } from './.shutro/bindings.js';
 
 export const ProjectProject = defineModel('project.project', {
+  label: 'Project',
   archivable: true,
   companyScoped: { required: true },
   order: ['name'],
@@ -48,6 +49,7 @@ export const ProjectProject = defineModel('project.project', {
 });
 
 export const ProjectTaskStage = defineModel('project.task.stage', {
+  label: 'Task stage',
   access: {
     'project.user': ['read'],
     'project.manager': ['read', 'write', 'create', 'unlink'],
@@ -64,6 +66,7 @@ export const ProjectTaskStage = defineModel('project.task.stage', {
 });
 
 export const ProjectTask = defineModel('project.task', {
+  label: 'Task',
   archivable: true,
   companyScoped: { required: true },
   order: ['sequence', 'id'],

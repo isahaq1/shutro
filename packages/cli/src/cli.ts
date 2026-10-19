@@ -25,6 +25,7 @@ import {
   runningRegistry,
   withDriver,
 } from './project.js';
+import { serve, users } from './serve.js';
 import { doctor, guidedInit } from './setup.js';
 import { createUi, type Key, outputMode, type Ui } from './ui.js';
 
@@ -41,6 +42,10 @@ export interface CliIo {
   readonly prompt?: (question: string) => Promise<string>;
   /** The next key press in raw mode, for arrow-key pickers (without it, pickers fall back to prompts). */
   readonly readKey?: () => Promise<Key>;
+  /** Reads a line without echo (passwords); without it, passwords come from the environment. */
+  readonly secret?: (question: string) => Promise<string>;
+  /** Stops `shutro serve` when it resolves (tests); otherwise Ctrl+C does. */
+  readonly until?: Promise<void>;
 }
 
 const USAGE = `Usage: shutro <command> [options]
@@ -49,6 +54,8 @@ Getting started:
   init [dir]                             Guided setup: project files, database, the default apps, company, admin
                                          (--minimal: config, a base module and migrations only, no apps)
   doctor                                 Check Node, the config, type views, PostgreSQL, migrations and apps
+  serve [--port 8069]                    Run the web app and its API (sign in at http://127.0.0.1:8069)
+  users [add|passwd|set] <login>         Who can sign in: passwords, roles and companies
 
 Apps:
   apps [list] [--all]                    The app catalog and what is installed (--all: technical and glue too)
@@ -82,6 +89,11 @@ Options:
   --admin <login>        init: administrator login
   --apps <a,b,...>       init: apps to install (default: settings,account,sale,purchase,project)
   --no-install           init: write the project files only
+  --port <n>             serve: port (default 8069)
+  --host <addr>          serve: address (default 127.0.0.1; Secure cookies off loopback)
+  --roles <a,b>          users add | set: roles (e.g. sale.user,account.user)
+  --companies <1,2>      users add | set: allowed company ids (default: all)
+  --name <text>          users add: display name
   --help                 Show this help
 
 Environment:
@@ -115,6 +127,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         currency: { type: 'string' },
         admin: { type: 'string' },
         apps: { type: 'string' },
+        port: { type: 'string' },
+        host: { type: 'string' },
+        'insecure-cookies': { type: 'boolean', default: false },
+        roles: { type: 'string' },
+        companies: { type: 'string' },
+        name: { type: 'string' },
       },
     });
     ui = createUi(io, outputMode(io, env, values.json));
@@ -144,12 +162,34 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
             admin: values.admin,
             apps: values.apps,
             database: values.database,
+            adminPassword: env['SHUTRO_ADMIN_PASSWORD'],
           },
           ui,
           io.cwd,
           env,
         );
       }
+      case 'serve':
+        return await serve(
+          configFile,
+          {
+            port: Number(values.port ?? 8069),
+            host: values.host ?? '127.0.0.1',
+            insecureCookies: values['insecure-cookies'],
+          },
+          ui,
+          env,
+          io.until,
+        );
+      case 'users':
+        return await users(
+          configFile,
+          sub,
+          arg,
+          { roles: values.roles, companies: values.companies, name: values.name },
+          ui,
+          env,
+        );
       case 'doctor':
         return await doctor(configFile, ui, env);
       case 'apps': {

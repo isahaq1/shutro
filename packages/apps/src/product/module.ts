@@ -11,6 +11,7 @@ import { defineModel, defineModule, f, record } from './.shutro/bindings.js';
 const manage = ['read', 'write', 'create', 'unlink', 'export', 'import'] as const;
 
 export const UomUom = defineModel('uom.uom', {
+  label: 'Unit of measure',
   access: { 'base.user': ['read'], 'base.admin': manage },
   order: ['category', 'name'],
   fields: {
@@ -26,6 +27,7 @@ export const UomUom = defineModel('uom.uom', {
 });
 
 export const AccountTax = defineModel('account.tax', {
+  label: 'Tax',
   archivable: true,
   access: { 'base.user': ['read'], 'base.admin': manage },
   order: ['name'],
@@ -42,6 +44,7 @@ export const AccountTax = defineModel('account.tax', {
 });
 
 export const ProductProduct = defineModel('product.product', {
+  label: 'Product',
   archivable: true,
   access: { 'base.user': ['read'], 'base.admin': manage },
   order: ['name'],

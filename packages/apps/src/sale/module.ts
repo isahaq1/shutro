@@ -34,6 +34,7 @@ const amounts = compute(
 );
 
 export const SaleOrder = defineModel('sale.order', {
+  label: 'Sales order',
   companyScoped: { required: true },
   order: ['dateOrder desc', 'id desc'],
   tracking: ['partner', 'amountTotal', 'state'],
@@ -99,6 +100,7 @@ export const SaleOrder = defineModel('sale.order', {
 });
 
 export const SaleOrderLine = defineModel('sale.order.line', {
+  label: 'Order line',
   access: {
     'sale.user': ['read', 'write', 'create', 'unlink'],
     'sale.manager': ['read', 'write', 'create', 'unlink'],

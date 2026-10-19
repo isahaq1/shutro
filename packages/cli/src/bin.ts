@@ -44,6 +44,44 @@ function readKey(): Promise<Key> {
   });
 }
 
+/** A line typed without echo (a • per character), for passwords. Ctrl+C aborts. */
+function secret(question: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(question);
+    let value = '';
+    emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    const done = (): void => {
+      process.stdin.off('keypress', onKey);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write('\n');
+    };
+    const onKey = (
+      text: string | undefined,
+      key: { name?: string; ctrl?: boolean } | undefined,
+    ): void => {
+      if (key?.ctrl === true && key.name === 'c') {
+        done();
+        reject(new Error('Cancelled: nothing was changed.'));
+      } else if (key?.name === 'return' || key?.name === 'enter') {
+        done();
+        resolve(value);
+      } else if (key?.name === 'backspace') {
+        if (value.length > 0) {
+          value = value.slice(0, -1);
+          process.stdout.write('\b \b');
+        }
+      } else if (text !== undefined && text.length === 1 && text >= ' ') {
+        value += text;
+        process.stdout.write('•');
+      }
+    };
+    process.stdin.on('keypress', onKey);
+  });
+}
+
 process.exitCode = await runCli(process.argv.slice(2), {
   cwd: process.cwd(),
   isTTY: process.stdout.isTTY === true,
@@ -65,6 +103,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
           }
         },
         readKey,
+        secret,
       }
     : {}),
 });

@@ -23,6 +23,8 @@ export interface UiIo {
   readonly prompt?: (question: string) => Promise<string>;
   /** The next key press, in raw mode (arrow-key pickers); `undefined` when keys cannot be read. */
   readonly readKey?: () => Promise<Key>;
+  /** Reads a line without echoing it (passwords); `undefined` when there is no terminal. */
+  readonly secret?: (question: string) => Promise<string>;
 }
 
 /** Picks the mode: `--json` wins, then a TTY without `NO_COLOR` / `TERM=dumb` is fancy. */
@@ -141,6 +143,8 @@ export interface Ui {
    * `undefined` when keys cannot be read (then ask another way).
    */
   choose(question: string, choices: readonly Choice[]): Promise<readonly string[] | undefined>;
+  /** Asks for a secret without echoing it; `undefined` when not interactive. */
+  secret(question: string): Promise<string | undefined>;
 }
 
 /** Visible width of a string (ANSI sequences removed, wide glyphs count as two). */
@@ -297,6 +301,11 @@ export function createUi(io: UiIo, mode: OutputMode): Ui {
         .toLowerCase();
       if (answer === '') return fallback;
       return answer === 'y' || answer === 'yes';
+    },
+    async secret(question) {
+      if (io.secret === undefined || mode === 'json') return undefined;
+      settle();
+      return io.secret(`  ${style('cyan', symbols.ask)} ${question} `);
     },
     async choose(question, choices) {
       const readKey = io.readKey;

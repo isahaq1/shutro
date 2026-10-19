@@ -7,6 +7,7 @@ import { icons } from '../icons.js';
 import { defineModel, defineModule, f, record } from './.shutro/bindings.js';
 
 export const ResUsers = defineModel('res.users', {
+  label: 'User',
   archivable: true,
   access: { 'base.user': ['read'] }, // administrators need no grant
   fields: {
@@ -17,6 +18,7 @@ export const ResUsers = defineModel('res.users', {
 });
 
 export const ResCurrency = defineModel('res.currency', {
+  label: 'Currency',
   access: { 'base.user': ['read'] },
   order: ['name'],
   fields: {
@@ -28,6 +30,7 @@ export const ResCurrency = defineModel('res.currency', {
 });
 
 export const ResCurrencyRate = defineModel('res.currency.rate', {
+  label: 'Exchange rate',
   access: { 'base.user': ['read'] },
   order: ['date desc'],
   fields: {
@@ -40,6 +43,7 @@ export const ResCurrencyRate = defineModel('res.currency.rate', {
 });
 
 export const ResCompany = defineModel('res.company', {
+  label: 'Company',
   access: { 'base.user': ['read'] },
   fields: {
     name: f.char({ required: true }),

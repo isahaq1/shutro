@@ -321,7 +321,9 @@ export function createServer(options: ServerOptions): ShutroServer {
     writeGuard(ctx, session);
     const body = await ctx.body();
     // Onchange computes a draft: nothing it does is kept.
-    return shutroDraft(session, (env) => records.onchange(env, model(ctx, env, session), body));
+    return shutroDraft(session, (env) =>
+      records.onchange(env, modelsFor(env, session), model(ctx, env, session), body),
+    );
   });
   router.add('POST', '/api/records/:model', async (ctx) => {
     const { session } = await sessionOf(ctx);

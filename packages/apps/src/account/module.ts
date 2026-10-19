@@ -36,6 +36,7 @@ function addDays(date: string, days: number): string {
 }
 
 export const AccountAccount = defineModel('account.account', {
+  label: 'Account',
   archivable: true,
   access: masterData,
   order: ['code'],
@@ -60,6 +61,7 @@ export const AccountAccount = defineModel('account.account', {
 });
 
 export const AccountJournal = defineModel('account.journal', {
+  label: 'Journal',
   archivable: true,
   access: masterData,
   order: ['code'],
@@ -81,6 +83,7 @@ export const AccountJournal = defineModel('account.journal', {
 });
 
 export const AccountPaymentTerm = defineModel('account.payment.term', {
+  label: 'Payment term',
   archivable: true,
   access: masterData,
   order: ['days'],
@@ -135,6 +138,7 @@ const paid = compute(
 );
 
 export const AccountMove = defineModel('account.move', {
+  label: 'Invoice',
   companyScoped: { required: true },
   order: ['date desc', 'id desc'],
   // Documents dated before today need 'account.backdate' (accounting managers, a special grant, or administrators).
@@ -304,6 +308,7 @@ export const AccountMove = defineModel('account.move', {
 });
 
 export const AccountMoveLine = defineModel('account.move.line', {
+  label: 'Invoice line',
   access: {
     'account.user': ['read', 'write', 'create', 'unlink'],
     'account.manager': ['read', 'write', 'create', 'unlink'],
@@ -341,6 +346,7 @@ export const AccountMoveLine = defineModel('account.move.line', {
 });
 
 export const AccountPayment = defineModel('account.payment', {
+  label: 'Payment',
   companyScoped: { required: true },
   order: ['date desc', 'id desc'],
   tracking: ['amount', 'state'],

@@ -30,7 +30,9 @@
     "@shutro/core": "workspace:*",
     "@shutro/driver-pg": "workspace:*",
     "@shutro/migrate": "workspace:*",
-    "@shutro/sql": "workspace:*"
+    "@shutro/server": "workspace:*",
+    "@shutro/sql": "workspace:*",
+    "@shutro/web": "workspace:*"
   },
   "devDependencies": {
     "@shutro/testing": "workspace:*"

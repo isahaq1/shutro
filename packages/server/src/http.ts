@@ -116,8 +116,9 @@ export async function readJson(req: IncomingMessage): Promise<unknown> {
 
 /** Headers on every response. */
 export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  // Scripts are 'self' only (the XSS barrier). Styles allow inline: the dialogs' scroll lock injects a <style> tag.
   'content-security-policy':
-    "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
   'referrer-policy': 'same-origin',

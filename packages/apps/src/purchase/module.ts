@@ -33,6 +33,7 @@ const amounts = compute(
 );
 
 export const PurchaseOrder = defineModel('purchase.order', {
+  label: 'Purchase order',
   companyScoped: { required: true },
   order: ['dateOrder desc', 'id desc'],
   tracking: ['partner', 'amountTotal', 'state'],
@@ -100,6 +101,7 @@ export const PurchaseOrder = defineModel('purchase.order', {
 });
 
 export const PurchaseOrderLine = defineModel('purchase.order.line', {
+  label: 'Purchase line',
   access: {
     'purchase.user': ['read', 'write', 'create', 'unlink'],
     'purchase.manager': ['read', 'write', 'create', 'unlink'],

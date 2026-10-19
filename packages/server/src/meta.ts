@@ -43,6 +43,10 @@ export interface ViewsMeta {
     readonly main: readonly string[];
     readonly lines: readonly { readonly field: string; readonly columns: readonly string[] }[];
     readonly notes: readonly string[];
+    /** Counters computed from relations, shown as smart buttons (`3 Invoices`). */
+    readonly smart: readonly string[];
+    /** Read-only amounts, shown as a totals block. */
+    readonly totals: readonly string[];
   };
   /** Kanban columns come from a state field, or a many2one to a model with a `sequence` field (stages). */
   readonly kanban: { readonly groupBy: string; readonly card: readonly string[] } | null;
@@ -94,7 +98,15 @@ export interface Meta {
 }
 
 /** Bookkeeping fields every model has: shown in the timeline, not in generated views. */
-const BOOKKEEPING = new Set(['id', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy', 'active']);
+const BOOKKEEPING = new Set([
+  'id',
+  'displayName',
+  'createdAt',
+  'updatedAt',
+  'createdBy',
+  'updatedBy',
+  'active',
+]);
 const PERMS: readonly Perm[] = ['read', 'write', 'create', 'unlink', 'export', 'import'];
 const LIST_KINDS = new Set([
   'char',
@@ -151,28 +163,39 @@ export function generateViews(
 ): ViewsMeta {
   const keys = Object.keys(fields).filter((k) => !BOOKKEEPING.has(k));
   const stateField = keys.find((k) => fields[k]?.kind === 'state') ?? null;
+  /** Counters computed from relations (`invoiceCount`): smart buttons, not columns. */
+  const isCounter = (k: string): boolean =>
+    fields[k]?.kind === 'integer' && fields[k]?.computed === true;
+  /** Who did it (`user`) and where (`company`) matter less than with whom (`partner`). */
+  const isContext = (k: string): boolean => {
+    const target = fields[k]?.target;
+    return target === 'res.users' || target === 'res.company' || target === 'res.currency';
+  };
   const visible = (k: string): boolean => {
     const f = fields[k];
     return (
-      f !== undefined &&
-      LIST_KINDS.has(f.kind) &&
-      !(f.kind === 'many2one' && f.target === 'res.currency')
+      f !== undefined && LIST_KINDS.has(f.kind) && f.target !== 'res.currency' && !isCounter(k)
     );
   };
+  const monetary = keys.filter((k) => fields[k]?.kind === 'monetary');
+  /** The amount a list shows: the total when there is one, else the first amount. */
+  const headline = monetary.find((k) => /total/i.test(k)) ?? monetary[0];
   const rank = (k: string): number => {
     const f = fields[k];
     if (k === model.recName) return 0;
-    if (f?.kind === 'many2one') return 1;
+    if (f?.kind === 'many2one') return isContext(k) ? 6 : 1;
     if (f?.kind === 'date' || f?.kind === 'datetime') return 2;
-    if (f?.kind === 'monetary') return 4;
+    if (k === headline) return 4;
+    if (f?.kind === 'monetary') return 8;
     if (f?.kind === 'state') return 9;
     return f?.required === true ? 3 : 5;
   };
   const columns = keys
     .filter(visible)
     .filter((k) => k !== 'company' || !model.companyScoped)
+    .filter((k) => fields[k]?.kind !== 'monetary' || k === headline)
     .sort((a, b) => rank(a) - rank(b))
-    .slice(0, 7);
+    .slice(0, 6);
   if (stateField !== null && !columns.includes(stateField)) columns.push(stateField);
 
   const lines = keys
@@ -187,21 +210,32 @@ export function generateViews(
               .filter((c) => c !== f.inverseField && !BOOKKEEPING.has(c))
               .filter((c) => {
                 const cf = child.fields[c];
-                return cf !== undefined && LIST_KINDS.has(cf.kind) && cf.target !== 'res.currency';
+                return (
+                  cf !== undefined &&
+                  LIST_KINDS.has(cf.kind) &&
+                  cf.target !== 'res.currency' &&
+                  !(cf.kind === 'integer' && cf.computed)
+                );
               })
               .slice(0, 7);
       return { field: k, columns: childColumns };
     });
   const notes = keys.filter((k) => fields[k]?.kind === 'text' || fields[k]?.kind === 'html');
+  const smart = keys.filter(isCounter);
+  const totals = monetary.filter((k) => fields[k]?.readonly === true);
   const main = keys.filter(
     (k) =>
       k !== model.recName &&
       k !== stateField &&
       fields[k]?.kind !== 'one2many' &&
       fields[k]?.kind !== 'many2many' &&
+      fields[k]?.kind !== 'binary' &&
       !notes.includes(k) &&
-      fields[k]?.kind !== 'binary',
+      !smart.includes(k) &&
+      !totals.includes(k),
   );
+  // Editable fields first, then what the system fills in.
+  main.sort((a, b) => Number(fields[a]?.readonly === true) - Number(fields[b]?.readonly === true));
 
   const stage = keys.find((k) => {
     const f = fields[k];
@@ -209,10 +243,16 @@ export function generateViews(
     return models(f.target)?.fields['sequence'] !== undefined;
   });
   const groupBy = stateField ?? stage ?? null;
-  const card = columns.filter((k) => k !== groupBy && k !== model.recName).slice(0, 3);
+  const card = [
+    ...keys.filter(
+      (k) => fields[k]?.kind === 'many2one' && !isContext(k) && k !== groupBy && k !== 'parent',
+    ),
+    ...(headline === undefined ? [] : [headline]),
+    ...keys.filter((k) => fields[k]?.kind === 'date'),
+  ].slice(0, 3);
   return {
     list: { columns },
-    form: { title: model.recName, statusbar: stateField, main, lines, notes },
+    form: { title: model.recName, statusbar: stateField, main, lines, notes, smart, totals },
     kanban: groupBy === null ? null : { groupBy, card },
     search: keys
       .filter((k) => fields[k]?.kind === 'char' || fields[k]?.kind === 'many2one')
@@ -284,6 +324,14 @@ export function buildMeta(
       views: generateViews(meta, fields, (m) => partial.get(m)),
     };
   }
+  // Lines (a one2many target whose inverse is required) live inside their parent's form, not in the menus.
+  const children = new Set<string>();
+  for (const model of Object.values(models))
+    for (const f of Object.values(model.fields))
+      if (f.kind === 'one2many' && f.target !== undefined && f.inverseField !== undefined) {
+        const inverse = models[f.target]?.fields[f.inverseField];
+        if (inverse?.required === true && f.target !== model.name) children.add(f.target);
+      }
   const menus: MenuMeta[] = [];
   const byModule = new Map<string, string[]>();
   for (const model of Object.values(models))
@@ -311,7 +359,7 @@ export function buildMeta(
     }
     (menu.models as { model: string; label: string }[]).push(
       ...names
-        .filter((n) => models[n]?.views.list.columns.length !== 0)
+        .filter((n) => models[n]?.views.list.columns.length !== 0 && !children.has(n))
         .map((n) => ({ model: n, label: models[n]?.label ?? n })),
     );
   }

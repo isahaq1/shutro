@@ -202,6 +202,8 @@ export async function read(
       form.title,
       ...form.main,
       ...form.notes,
+      ...form.smart,
+      ...form.totals,
       ...(form.statusbar === null ? [] : [form.statusbar]),
     ].filter((k) => model.fields[k] !== undefined),
   );
@@ -264,7 +266,12 @@ export async function remove(env: DynamicEnv, model: ModelMeta, id: number): Pro
 }
 
 /** `POST /api/records/:model/onchange`: what the form must change while the user types. */
-export async function onchange(env: DynamicEnv, model: ModelMeta, body: unknown) {
+export async function onchange(
+  env: DynamicEnv,
+  models: Readonly<Record<string, ModelMeta>>,
+  model: ModelMeta,
+  body: unknown,
+): Promise<{ values: Record<string, unknown>; warnings: readonly string[] }> {
   const request = asObject(body, 'The request');
   const changed = asStringList(request['changed'], 'changed') ?? [];
   for (const key of changed)
@@ -275,7 +282,29 @@ export async function onchange(env: DynamicEnv, model: ModelMeta, body: unknown)
     if (model.fields[k] !== undefined && model.fields[k]?.kind !== 'one2many')
       values[k] = typeof v === 'object' && v !== null && 'id' in v ? (v as Ref).id : v;
   const id = typeof request['id'] === 'number' ? request['id'] : undefined;
-  return env.model(model.name).onchange({ ...(id === undefined ? {} : { id }), values, changed });
+  const result = await env
+    .model(model.name)
+    .onchange({ ...(id === undefined ? {} : { id }), values, changed });
+  // Many2one values come back as ids: give them their display names, like every other response.
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(result.values)) {
+    if (model.fields[key] === undefined) continue; // fields the user may not read stay out
+    out[key] = value;
+  }
+  for (const [key, value] of Object.entries(out)) {
+    const f = model.fields[key];
+    if (f?.kind !== 'many2one' || typeof value !== 'number' || f.target === undefined) continue;
+    const target = models[f.target];
+    if (target === undefined || target.recName === 'id') {
+      out[key] = { id: value, name: `#${value}` } satisfies Ref;
+      continue;
+    }
+    const [row] = (await env.model(f.target).browse([value]).load([target.recName])).read([
+      target.recName,
+    ]);
+    out[key] = { id: value, name: String(row?.[target.recName] ?? `#${value}`) } satisfies Ref;
+  }
+  return { values: out, warnings: result.warnings };
 }
 
 /** `POST /api/records/:model/:id/transition/:name`: declared transitions only, with their guards and permissions. */
@@ -297,7 +326,7 @@ export async function trail(
   model: ModelMeta,
   id: number,
   before: number | undefined,
-) {
+): Promise<readonly unknown[]> {
   return (await one(env, model, id)).trail({
     limit: 50,
     ...(before === undefined ? {} : { before }),

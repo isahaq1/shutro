@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "@shutro/ui/styles.css";
+
+@source "../../ui/src";
+@source "./";

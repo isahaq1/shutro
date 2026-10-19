@@ -10,6 +10,7 @@ import { defineModel, defineModule, f, method } from './.shutro/bindings.js';
 const manage = ['read', 'write', 'create', 'unlink', 'export', 'import'] as const;
 
 export const ResConfigParameter = defineModel('res.config.parameter', {
+  label: 'Setting',
   companyScoped: { required: false }, // no company: the setting applies to every company
   access: { 'base.user': ['read'], 'settings.manager': manage },
   order: ['key'],

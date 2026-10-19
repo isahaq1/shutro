@@ -5,12 +5,14 @@
  * creates the database when it is missing, installs the chosen apps atomically with live progress, and creates the
  * company and the administrator. Running it again in the same directory resumes: existing files are kept.
  */
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { type base, DEFAULT_APPS, officialApps } from '@shutro/apps';
 import { createShutro, type ModuleBase, type Registry, type SchemaOfModule } from '@shutro/core';
 import { createDriver, type Driver, DriverError } from '@shutro/driver-pg';
 import { createAppManager, desiredSchema, migrationStatus, planMigration } from '@shutro/migrate';
+import { MIN_PASSWORD, setMembership, setPassword } from '@shutro/server';
 import { compile, sql } from '@shutro/sql';
 import { progressReporter } from './apps.js';
 import { CliError } from './errors.js';
@@ -30,6 +32,8 @@ export interface InitFlags {
   /** Comma-separated app names. */
   readonly apps?: string | undefined;
   readonly database?: string | undefined;
+  /** From SHUTRO_ADMIN_PASSWORD (never a flag: flags end up in shell history). */
+  readonly adminPassword?: string | undefined;
 }
 
 /** The URL without its password, for display and for the config file. */
@@ -361,7 +365,7 @@ export async function guidedInit(
     ui.heading('Company', '🏢');
     const setting = ui.task('Setting up the company and the administrator…');
     const made = await shutro.bootstrap({ reason: 'init' }, async (env) => {
-      const out = { company: false, admin: false };
+      const out = { company: false, admin: false, adminId: 0, companies: [] as number[] };
       if ((await env.model('res.company').search({ limit: 1 })).length === 0) {
         const currencyId = await env.refId(
           'res.currency',
@@ -370,18 +374,44 @@ export async function guidedInit(
         await env.model('res.company').create([{ name: company, currency: currencyId }]);
         out.company = true;
       }
-      if (
-        (await env.model('res.users').search({ where: { login: admin }, limit: 1 })).length === 0
-      ) {
-        await env.model('res.users').create([{ login: admin, name: 'Administrator' }]);
+      const existing = await env.model('res.users').search({ where: { login: admin }, limit: 1 });
+      if (existing.length === 0) {
+        const [created] = await env
+          .model('res.users')
+          .create([{ login: admin, name: 'Administrator' }]);
         out.admin = true;
-      }
+        out.adminId = created?.id ?? 0;
+      } else out.adminId = existing.ids[0] ?? 0;
+      out.companies = [...(await env.model('res.company').search({})).ids];
       return out;
     });
     if (made.company) setting.done(`${company} ${ui.style('dim', `· ${currency}`)}`);
     else setting.done('A company already exists: kept.');
-    if (made.admin) ui.ok(`Administrator ${ui.style('bold', admin)}`);
-    else ui.info(`User ${admin} already exists: kept.`);
+
+    // The administrator can sign in to the web client (shutro serve).
+    let shownPassword: string | undefined;
+    if (made.admin) {
+      let password = flags.adminPassword;
+      while (password === undefined) {
+        const typed = await ui.secret(
+          `Password for ${admin} (${MIN_PASSWORD}+ characters, empty to generate one)`,
+        );
+        if (typed === undefined || typed === '') break;
+        if (typed.length >= MIN_PASSWORD) password = typed;
+        else ui.warn(`At least ${MIN_PASSWORD} characters, please.`);
+      }
+      if (password === undefined) {
+        password = randomBytes(12).toString('base64url');
+        shownPassword = password;
+      }
+      await setPassword(driver, made.adminId, password);
+      await setMembership(driver, made.adminId, {
+        groups: ['base.admin'],
+        grants: [],
+        companies: made.companies,
+      });
+      ui.ok(`Administrator ${ui.style('bold', admin)} can sign in`);
+    } else ui.info(`User ${admin} already exists: kept.`);
 
     // 7. Summary
     const installed = (await apps.list()).filter((a) => a.state === 'installed');
@@ -394,6 +424,13 @@ export async function guidedInit(
           `${appsInstalled.length} apps, ${count(installed.length)} modules, ready in ${duration(Date.now() - started)}.`,
         ),
         appsInstalled.map((a) => `${ui.glyph(a.glyph)}${a.label}`).join('   '),
+        ...(shownPassword === undefined
+          ? []
+          : [
+              '',
+              `Sign in as ${ui.style('bold', admin)} with ${ui.style('bold', shownPassword)}`,
+              ui.style('dim', `Shown once: change it with "shutro users passwd ${admin}".`),
+            ]),
       ],
       { title: `${ui.mode === 'fancy' ? '🚀' : ui.symbols.ok} Ready`, color: 'green' },
     );
@@ -403,6 +440,7 @@ export async function guidedInit(
       ...(needsInstall
         ? [['npm install', ui.style('dim', 'the Shutro packages the project imports')]]
         : []),
+      ['shutro serve', ui.style('dim', 'open the web app (http://127.0.0.1:8069)')],
       ...(new URL(url).password !== ''
         ? [
             [

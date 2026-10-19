@@ -8,6 +8,7 @@ import { check, defineModel, defineModule, f } from './.shutro/bindings.js';
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 export const ResPartner = defineModel('res.partner', {
+  label: 'Contact',
   archivable: true,
   companyScoped: { required: false },
   order: ['name'],

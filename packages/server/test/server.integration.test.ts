@@ -208,7 +208,7 @@ describe('metadata', () => {
       'sale',
       'settings',
     ]);
-    expect(all.models['sale.order']?.views.list.columns.slice(0, 2)).toEqual(['name', 'user']);
+    expect(all.models['sale.order']?.views.list.columns.slice(0, 2)).toEqual(['name', 'partner']);
 
     const alice = new Browser();
     await alice.login('alice');
