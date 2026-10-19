@@ -45,9 +45,9 @@ records.
 
 | #  | Weakness | Consequence |
 | -- | -------- | ----------- |
-| W1 | **Install is not atomic.** Every module commits separately, and some steps run outside the transaction. | A failed install leaves modules stuck in `to install`. This is a common support ticket, usually fixed by hand in SQL. |
-| W2 | **Uninstall is destructive and blind.** There is no preview of what gets lost, and no undo. | Clicking "Uninstall" on Accounting deletes years of data. A backup is the only way back. |
-| W3 | **Cross-module columns disappear silently.** Uninstalling `sale_stock` drops columns from `sale_order` without saying so. | Reports and integrations break later. |
+| W1 | **Install is not guaranteed atomic.** A failed or interrupted install can leave modules in `to install` / `to upgrade`. | The state has to be reset by hand (a common support ticket, often fixed in SQL). |
+| W2 | **Uninstall is final.** The wizard lists the dependent modules and how many records of each model will be deleted, but there is no undo, and a module cannot refuse to be uninstalled. | Confirming the uninstall of Accounting deletes years of data. A backup is the only way back. |
+| W3 | **Columns on other apps' models are not listed.** The preview counts records per model; fields that an uninstalled module added to other models (`sale_stock` on `sale_order`) are dropped without being named. | Reports and integrations that read those fields break later. |
 | W4 | **No real CLI UX.** `odoo-bin -i module` prints a log wall, and there is no plan, progress or summary. | Operators can't tell what happened or how long it will take. |
 | W5 | **Python code is always loaded,** even for uninstalled modules, and is guarded only by registry state. | Code that touches an uninstalled model fails with `KeyError` or SQL errors at runtime. |
 
@@ -433,3 +433,11 @@ Where the implementation refines this RFC:
     fails at DDL time (feedback #23).
 11. **Not done in this round:** porting `examples/erp-demo` onto the official apps (step 7, second sentence). The demo
     still defines its own modules and keeps passing.
+
+## Revision (2026-10-19): Odoo's uninstall, corrected
+
+§3 first said Odoo's uninstall has "no preview of what gets lost". That was wrong: Odoo's uninstall wizard lists the
+dependent modules and how many records of each model will be deleted. W1–W3 now say what holds: an interrupted
+install can leave modules in `to install`; uninstall is final (no undo) and modules cannot refuse it; fields added to
+other apps' models are not named in the preview. The design is unchanged: what Shutro adds over Odoo is the undo
+(30-day quarantine and restore), blockers, columns named in the preview, the atomic operation, and the log.
