@@ -686,7 +686,9 @@ Resolved on 2026-10-14. The original questions are kept below for context.
 4. **Schema migrations are files, not live DDL.** `planMigration` diffs the live `pg_catalog` against
    `desiredSchema(registry)`; `writeMigrationFile` emits `NNNN_name.sql`; `applyMigrations` runs pending files in order
    and refuses destructive statements without `allowDestructive`. S1's defaults become the backfill when a column turns
-   required (§7.3). Check constraints and partial-index predicates must be parameter-free `sql` fragments.
+   required (§7.3). Check constraints and partial-index predicates must be parameter-free `sql` fragments. Tables the
+   application owns outside the models (a framework's own, e.g. `kosh_*`) are passed as `ignore` (names, `prefix*`,
+   regular expressions) and never altered or dropped; `shutro_*` are always ignored.
 5. **`createTableStatements` in core stays** as the test stopgap; the migrator's plan over a stopgap-created schema
    contains only the indexes the stopgap doesn't create, which is asserted in the integration tests.
 6. **Not here:** data files / seed data (§12), renames (a drop plus an add in the diff: write the `RENAME` by hand), and

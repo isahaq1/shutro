@@ -21,13 +21,38 @@ export interface MigrationPlan {
   readonly statements: readonly { readonly sql: string; readonly destructive: boolean }[];
 }
 
-/** Compares the registry with the live database and plans the changes. */
+/** True when `ignore` names the table: an exact name, a `prefix*`, or a regular expression. */
+function ignored(name: string, ignore: readonly (string | RegExp)[]): boolean {
+  return ignore.some((p) =>
+    typeof p === 'string'
+      ? p.endsWith('*')
+        ? name.startsWith(p.slice(0, -1))
+        : name === p
+      : p.test(name),
+  );
+}
+
+/**
+ * Compares the registry with the live database and plans the changes. Tables in `ignore` belong to the
+ * application, not to the models (a framework's own tables, e.g. `kosh_*`): they are never altered or dropped.
+ */
 export async function planMigration(options: {
   readonly driver: Driver;
   readonly registry: Registry;
   readonly schema?: string;
+  readonly ignore?: readonly (string | RegExp)[];
 }): Promise<MigrationPlan> {
-  const live = await readLiveSchema(options.driver, options.schema ?? 'public');
+  const read = await readLiveSchema(options.driver, options.schema ?? 'public');
+  const ignore = options.ignore ?? [];
+  const live =
+    ignore.length === 0
+      ? read
+      : {
+          ...read,
+          tables: Object.fromEntries(
+            Object.entries(read.tables).filter(([name]) => !ignored(name, ignore)),
+          ),
+        };
   const operations = diffSchema(desiredSchema(options.registry), live);
   return {
     operations,

@@ -136,6 +136,19 @@ describe('plan, write, apply', () => {
     expect((await planMigration({ driver, registry })).operations).toEqual([]);
   });
 
+  test('tables of the application (ignore) are never dropped', async () => {
+    await driver.query(compile(sql`CREATE TABLE app_cache (k text PRIMARY KEY)`));
+    try {
+      const registry = saleRegistry(1);
+      const plain = await planMigration({ driver, registry });
+      expect(plain.destructive.map((o) => o.kind)).toEqual(['dropTable']);
+      for (const ignore of [['app_cache'], ['app_*'], [/^app_/]])
+        expect((await planMigration({ driver, registry, ignore })).operations).toEqual([]);
+    } finally {
+      await driver.query(compile(sql`DROP TABLE app_cache`));
+    }
+  });
+
   test('the live catalog reader sees what was created', async () => {
     const live = await readLiveSchema(driver);
     expect(live.tables['sale_order']?.columns['amount']).toMatchObject({
