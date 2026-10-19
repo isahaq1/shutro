@@ -30,11 +30,39 @@ export interface DataMigration {
   readonly up: (ctx: MigrationContext) => Promise<void>;
 }
 
+/** What an uninstall blocker receives (RFC 0019 §7.6): raw SQL on the uninstall transaction, and the registry. */
+export type UninstallContext = MigrationContext;
+
+/** Uninstall behaviour of a module (RFC 0019 §7.6). */
+export interface UninstallSpec {
+  /**
+   * Reasons to refuse the uninstall, e.g. "posted journal entries exist". An empty list allows it. Runs inside the
+   * uninstall transaction, before anything changes.
+   */
+  readonly blockers?: (ctx: UninstallContext) => Promise<readonly string[]>;
+}
+
 /** A module without the type parameters that carry its models and dependencies. */
 export interface ModuleBase {
   readonly name: string;
   readonly version: string;
   readonly label: string;
+  /** Listed in the app catalog (RFC 0019 §7.1); other modules are technical. */
+  readonly application: boolean;
+  /** Installed with the last of its dependencies and removed with the first (glue modules, RFC 0019 R6). */
+  readonly autoInstall: boolean;
+  /** Can never be uninstalled (`base`, `settings`). */
+  readonly required: boolean;
+  /** SVG icon: inline markup (`<svg …>`) or a URL / path ending in `.svg`. */
+  readonly icon: string | undefined;
+  /** A short terminal glyph (an emoji), shown when the terminal supports Unicode. */
+  readonly glyph: string | undefined;
+  /** Catalog category; `'Technical'` for non-applications without one. */
+  readonly category: string;
+  /** One line describing what the module does. */
+  readonly summary: string;
+  /** Uninstall behaviour. */
+  readonly uninstall: UninstallSpec;
   readonly depends: readonly ModuleBase[];
   readonly models: readonly AnyModel[];
   readonly extensions: readonly AnyExtension[];
@@ -61,8 +89,31 @@ export interface Module<
   readonly extensions: Exts;
 }
 
+/**
+ * App flags of {@link ModuleDefinition}: an application is chosen by people, a glue module (`autoInstall`) follows its
+ * dependencies, so a module cannot be both.
+ */
+export type AppKind =
+  | {
+      /** Listed in the app catalog (RFC 0019 §7.1). */
+      readonly application: true;
+      readonly autoInstall?: false;
+    }
+  | {
+      readonly application?: false;
+      /** Installed with the last of its dependencies, removed with the first (RFC 0019 R6). */
+      readonly autoInstall?: boolean;
+    };
+
 /** The argument of {@link defineModule}. */
-export interface ModuleDefinition<
+export type ModuleDefinition<
+  Ms extends readonly AnyModel[],
+  Deps extends readonly ModuleBase[],
+  Exts extends readonly AnyExtension[],
+> = ModuleFields<Ms, Deps, Exts> & AppKind;
+
+/** The fields of {@link ModuleDefinition} other than the app flags. */
+export interface ModuleFields<
   Ms extends readonly AnyModel[],
   Deps extends readonly ModuleBase[],
   Exts extends readonly AnyExtension[],
@@ -89,6 +140,18 @@ export interface ModuleDefinition<
   readonly permissions?: readonly PermissionDefinition[];
   /** Records the module ships (`record`, `override`; RFC 0017), loaded in this order by `shutro migrate apply`. */
   readonly data?: readonly DataRecord[];
+  /** Can never be uninstalled (RFC 0019 §11.4). */
+  readonly required?: boolean;
+  /** SVG icon for app stores: inline markup (`<svg …>`, at most 64 KB) or a URL / path ending in `.svg`. */
+  readonly icon?: string | URL;
+  /** A short terminal glyph, e.g. `'🛒'`. */
+  readonly glyph?: string;
+  /** Catalog category, e.g. `'Sales'`. */
+  readonly category?: string;
+  /** One line describing what the module does. */
+  readonly summary?: string;
+  /** Uninstall behaviour (RFC 0019 §7.6). */
+  readonly uninstall?: UninstallSpec;
 }
 
 const MODULE_NAME = /^[a-z][a-z0-9_]*$/;
@@ -105,6 +168,34 @@ export function compareVersions(a: string, b: string): number {
     if (d !== 0) return d;
   }
   return 0;
+}
+
+const MAX_INLINE_ICON = 64 * 1024;
+
+/** Validates an icon: inline SVG markup within the size limit, or a URL / path to an `.svg` file. */
+function iconOf(module: string, icon: string | URL | undefined): string | undefined {
+  if (icon === undefined) return undefined;
+  const text: unknown = icon instanceof URL ? icon.href : icon;
+  if (typeof text !== 'string')
+    throw new InvalidModuleError(
+      `Module '${module}' has an icon that is neither a string nor a URL.`,
+      "Pass inline SVG markup, a path, or new URL('./icon.svg', import.meta.url).",
+    );
+  if (text.trimStart().startsWith('<svg')) {
+    const size = Buffer.byteLength(text);
+    if (size > MAX_INLINE_ICON)
+      throw new InvalidModuleError(
+        `Module '${module}' has an inline icon of ${size} bytes.`,
+        'Keep icons at 64 KB or less: simplify the SVG, or ship it as a file.',
+      );
+    return text;
+  }
+  if (!/\.svg([?#].*)?$/i.test(text))
+    throw new InvalidModuleError(
+      `Module '${module}' has icon ${JSON.stringify(text)}, which is not an SVG.`,
+      'Icons are SVG so they scale in every app store: pass inline <svg> markup or a path ending in .svg.',
+    );
+  return text;
 }
 
 /** True when `value` was produced by {@link defineModule}. */
@@ -200,10 +291,43 @@ export function defineModule<
       );
   }
   migrations.sort((a, b) => compareVersions(a.version, b.version));
+  const application = definition.application === true;
+  const autoInstall = definition.autoInstall === true;
+  if (application && autoInstall)
+    throw new InvalidModuleError(
+      `Module '${name}' is both an application and autoInstall.`,
+      'Applications are chosen by people; autoInstall is for glue modules that follow their dependencies. Drop one.',
+    );
+  if (autoInstall && depends.length < 2)
+    throw new InvalidModuleError(
+      `Module '${name}' is autoInstall with ${depends.length} dependency(ies).`,
+      'autoInstall glues two or more modules together (sale_purchase depends on sale and purchase); otherwise make it a dependency of the app.',
+    );
+  if (definition.glyph !== undefined && [...definition.glyph].length > 4)
+    throw new InvalidModuleError(
+      `Module '${name}' has glyph ${JSON.stringify(definition.glyph)}.`,
+      "Use one emoji or a short symbol, e.g. '🛒'.",
+    );
+  if (
+    definition.uninstall?.blockers !== undefined &&
+    typeof definition.uninstall.blockers !== 'function'
+  )
+    throw new InvalidModuleError(
+      `Module '${name}' uninstall.blockers is not a function.`,
+      'Pass uninstall: { blockers: async (ctx) => [...reasons] }.',
+    );
   const module: Module<Ms, Deps, Exts> = Object.freeze({
     name,
     version,
     label: definition.label ?? humanize(name),
+    application,
+    autoInstall,
+    required: definition.required === true,
+    icon: iconOf(name, definition.icon),
+    glyph: definition.glyph,
+    category: definition.category ?? (application ? 'Other' : 'Technical'),
+    summary: definition.summary ?? '',
+    uninstall: Object.freeze({ ...(definition.uninstall ?? {}) }),
     depends: Object.freeze([...depends]) as unknown as Deps,
     models: Object.freeze([...definition.models]) as unknown as Ms,
     extensions: Object.freeze([...extensions]) as unknown as Exts,
