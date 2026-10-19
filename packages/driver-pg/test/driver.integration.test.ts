@@ -250,6 +250,20 @@ describe.each(targets)('via %s', (target) => {
     expect(err).toBeInstanceOf(DriverError);
     expect((err as DriverError).code).toBe('PARAM_IN_TEXT');
   });
+
+  test('the guard ignores values that only appear inside quoted identifiers', async () => {
+    // purchase.order's state 'purchase' is part of the table name "purchase_order": not a leak.
+    const rows = await db.query<{ state: string }>(
+      compile(
+        sql`SELECT ${'purchase'}::text AS state FROM (SELECT 1) AS ${sql.id('purchase_order')}`,
+      ),
+    );
+    expect(rows).toEqual([{ state: 'purchase' }]);
+    const err = await db
+      .query({ text: `SELECT 'purchase' AS "purchase_order", $1::text AS b`, params: ['purchase'] })
+      .catch((e: unknown) => e);
+    expect((err as DriverError).code).toBe('PARAM_IN_TEXT'); // still caught outside identifiers
+  });
 });
 
 describe('direct-only features', () => {

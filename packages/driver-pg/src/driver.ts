@@ -109,10 +109,16 @@ function collectStrings(value: unknown, out: string[]): void {
   }
 }
 
+/** Quoted identifiers (`"purchase_order"`): `sql.id()` validates them, so a value inside one is not a leak. */
+const QUOTED_IDENTIFIER = /"(?:[^"]|"")*"/g;
+
 function guardParamsInText(query: DriverQuery): void {
   const strings: string[] = [];
   for (const p of query.params) collectStrings(p, strings);
-  const leaked = strings.find((s) => query.text.includes(s));
+  if (strings.length === 0) return;
+  // A state 'purchase' written to "purchase_order" is a value equal to part of a table name, not concatenation.
+  const text = query.text.replace(QUOTED_IDENTIFIER, '""');
+  const leaked = strings.find((s) => text.includes(s));
   if (leaked !== undefined) {
     throw new DriverError(
       'PARAM_IN_TEXT',
