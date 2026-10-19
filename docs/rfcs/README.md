@@ -26,7 +26,7 @@ An RFC is only implemented after it has been approved and its status set to **Ac
 | 0017 | [External IDs and module data](0017-external-ids-and-module-data.md) | Implemented | 0002, 0012, 0013 |
 | 0018 | [Lost-update protection, transactional events, jobs and history](0018-concurrency-events-jobs-history.md) | Implemented | 0003, 0004, 0013 |
 | 0019 | [Apps, guided installer, and module install/uninstall](0019-apps-installer-and-lifecycle.md) | Implemented | 0002, 0013, 0014, 0017 |
-| 0020 | [Web client (Kosh UI)](0020-web-client.md) | Draft | 0001, 0004, 0009, 0010, 0013, 0014, 0016, 0018, 0019 |
+| 0020 | [Web client (Kosh UI)](0020-web-client.md) | Accepted | 0001, 0004, 0009, 0010, 0013, 0014, 0016, 0018, 0019 |
 
 ## Lifecycle
 

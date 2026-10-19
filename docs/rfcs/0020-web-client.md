@@ -1,6 +1,6 @@
 # RFC 0020: Web client (Kosh UI)
 
-- **Status:** Draft
+- **Status:** Accepted (2026-10-19, recommendations in §11 adopted)
 - **Date:** 2026-10-19
 - **Depends on:** 0001 (models), 0004 (recordsets), 0009 (onchange), 0010 (state machines), 0013 (audit), 0014
   (security), 0016 (aggregates), 0018 (events, history), 0019 (apps)
@@ -234,17 +234,14 @@ SPA's internals.
   client refetches `/api/meta`.
 - **0016:** pivots, charts, group subtotals and dashboard tiles are `aggregate()` calls.
 
-## 11. Open questions (need your decision)
+## 11. Resolved questions
 
-1. **Where does it live?** The recommendation is this monorepo (`packages/server`, `packages/web`, `packages/ui`),
-   named `@shutro/*` until Kosh exists as its own project. The alternative is a separate Kosh repository, which keeps
-   Shutro a pure ORM as CLAUDE.md describes it.
-2. **Frontend stack:** React 19 + TanStack + Radix + Tailwind (recommended: ecosystem, accessibility, hiring), or
-   SolidJS / Svelte 5 (smaller and faster, with a thinner component ecosystem).
-3. **Sign-in:** built-in password + TOTP (recommended for a self-contained ERP), or delegate to an external identity
-   provider (OIDC) from the start. Both can come later; this decides v1.
-4. **v1 scope:** the recommendation is shell, app store, generated list / form / kanban, user views, live onchange,
-   timeline, command palette, and themes. Then calendar, pivot, chart, dashboards, import/export, and `asOf` in v2.
+| # | Decision |
+| - | -------- |
+| 1 | **This monorepo:** `packages/server`, `packages/web`, `packages/ui`, named `@shutro/*` until Kosh is its own project. |
+| 2 | **React 19 + TanStack (Query, Router, Table, Virtual) + Radix + Tailwind 4.** |
+| 3 | **Built-in sign-in:** scrypt passwords, optional TOTP, sessions; OIDC later. |
+| 4 | **v1:** shell, app store, generated list / form / kanban, user views, live onchange, timeline, command palette, themes. Calendar, pivot, chart, dashboards, import / export and `asOf` follow in v2. |
 
 ## 12. Deferred
 

@@ -9,6 +9,7 @@ const packages = [
   'i18n',
   'migrate',
   'security',
+  'server',
   'sequence',
   'sql',
   'testing',

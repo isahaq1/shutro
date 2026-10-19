@@ -41,6 +41,9 @@ importers:
       '@shutro/sequence':
         specifier: workspace:*
         version: link:packages/sequence
+      '@shutro/server':
+        specifier: workspace:*
+        version: link:packages/server
       '@shutro/sql':
         specifier: workspace:*
         version: link:packages/sql
@@ -219,6 +222,28 @@ importers:
       '@shutro/sql':
         specifier: workspace:*
         version: link:../sql
+
+  packages/server:
+    dependencies:
+      '@shutro/core':
+        specifier: workspace:*
+        version: link:../core
+      '@shutro/driver-pg':
+        specifier: workspace:*
+        version: link:../driver-pg
+      '@shutro/migrate':
+        specifier: workspace:*
+        version: link:../migrate
+      '@shutro/sql':
+        specifier: workspace:*
+        version: link:../sql
+    devDependencies:
+      '@shutro/apps':
+        specifier: workspace:*
+        version: link:../apps
+      '@shutro/testing':
+        specifier: workspace:*
+        version: link:../testing
 
   packages/sql:
     devDependencies:
