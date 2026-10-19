@@ -89,7 +89,6 @@ export {
 export { assertTimeZone, calendarDateIn } from './env/time.js';
 export {
   AccessError,
-  AppNotInstalledError,
   CompanyNotAllowedError,
   ComputeAssignmentError,
   ComputeCycleError,
@@ -330,7 +329,6 @@ export {
   replace,
 } from './registry/extension.js';
 export {
-  type AppKind,
   compareVersions,
   type DataMigration,
   defineModule,
@@ -339,9 +337,6 @@ export {
   type Module,
   type ModuleBase,
   type ModuleDefinition,
-  type ModuleFields,
-  type UninstallContext,
-  type UninstallSpec,
 } from './registry/module.js';
 export {
   buildRegistry,

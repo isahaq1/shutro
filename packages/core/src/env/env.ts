@@ -14,7 +14,6 @@ import { compile, sql as sqlTag } from '@shutro/sql';
 import { refId } from '../data/load.js';
 import {
   AccessError,
-  AppNotInstalledError,
   CompanyNotAllowedError,
   ConcurrentUpdateError,
   FlagNotAllowedError,
@@ -54,7 +53,6 @@ import {
 } from '../recordset/security.js';
 import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ListLoaded, ModelName, ModelRef, RecordSet } from '../recordset/types.js';
-import type { ModuleBase } from '../registry/module.js';
 import type { Registry } from '../registry/registry.js';
 import {
   administratorCodes,
@@ -186,10 +184,8 @@ export interface ComputeState {
 interface Runtime {
   readonly als: AsyncLocalStorage<Scope>;
   readonly onHookError: (error: unknown, phase: 'afterCommit' | 'onRollback') => void;
-  /** The current registry; each scope captures the one it started with (RFC 0019 §7.5). */
+  /** The current registry; each scope captures the one it started with (see `useRegistry`). */
   registry: Registry | undefined;
-  /** Model → owning module, for every available module (installed or not, RFC 0019 §6). */
-  readonly owners: ReadonlyMap<string, string>;
   /** Dev-mode query inspector, if any. */
   readonly inspector: Inspector | undefined;
   /** The pool, for autonomous transactions (standard sequences, RFC 0012 §7.2). */
@@ -375,33 +371,10 @@ export class Env<S = unknown> {
 
   /** An empty recordset of `name`: `search()` / `browse()` / `create()` start here (RFC 0004). */
   model<M extends ModelName<S>>(name: M): ModelRef<S, M> {
-    const registry = this.#runtime.registry;
-    if (registry === undefined) throw new NoRegistryError();
+    if (this.#runtime.registry === undefined) throw new NoRegistryError();
     this.#assertUsable();
-    if (!registry.has(name)) {
-      const owner = this.#runtime.owners.get(name);
-      if (owner !== undefined) throw new AppNotInstalledError(name, owner);
-    }
     // The runtime is untyped over S; widening here is safe because it never reads S.
     return modelRef(this as unknown as Env, name) as unknown as ModelRef<S, M>;
-  }
-
-  /**
-   * The modules installed in this database (RFC 0019 §7.8), as of the start of the transaction. Guard code that uses
-   * an optional app:
-   *
-   * ```ts
-   * if (env.apps.has('purchase')) await env.model('purchase.order').search({ where: { state: 'purchase' } });
-   * ```
-   */
-  get apps(): {
-    /** True when `module` is installed. */
-    has(module: string): boolean;
-    /** Installed module names, in load order. */
-    readonly installed: readonly string[];
-  } {
-    const installed = this.#runtime.registry?.loadOrder ?? [];
-    return { has: (module) => installed.includes(module), installed };
   }
 
   /** What this environment may do (RFC 0014): for Kosh menus, export / import buttons and API guards. */
@@ -1051,11 +1024,6 @@ export interface ShutroOptions<S> {
   readonly driver: Driver;
   /** The registry built from the application's modules. Without it, `env.model()` is unavailable. */
   readonly registry?: Registry<S>;
-  /**
-   * Every module the application ships, installed or not (RFC 0019): `env.model()` of a model whose module is listed
-   * here but missing from the registry throws {@link AppNotInstalledError} instead of an unknown-model error.
-   */
-  readonly catalog?: readonly ModuleBase[];
   /** The source language of translatable fields: what readers of a language without text see. Default `en_US`. */
   readonly sourceLang?: string;
   /** Keys for `encrypted` fields (RFC 0014 §7.6): `createKeyRing({ current, keys })`. */
@@ -1170,8 +1138,8 @@ export interface Shutro<S = unknown> {
   /** The current registry (the one new scopes start with). */
   readonly registry: Registry | undefined;
   /**
-   * Replaces the registry, e.g. after an app was installed (RFC 0019 §7.5). Running transactions finish on the
-   * registry they started with; the next `run()` uses the new one.
+   * Replaces the registry, e.g. after modules were added to a running application. Running transactions finish on
+   * the registry they started with; the next `run()` uses the new one.
    *
    * @throws {InvalidSequenceError} when the new registry needs a larger pool.
    */
@@ -1238,20 +1206,10 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
   const attempts = options.retry?.attempts ?? 5;
   const backoff = options.retry?.backoffMs ?? defaultBackoff;
   assertPoolFits(options.driver, options.registry as Registry | undefined);
-  const owners = new Map<string, string>();
-  const visit = (module: ModuleBase): void => {
-    for (const model of module.models) {
-      if (owners.has(model.name)) continue;
-      owners.set(model.name, module.name);
-    }
-    for (const dep of module.depends) visit(dep);
-  };
-  for (const module of options.catalog ?? []) visit(module);
   const runtime: Runtime = {
     als: new AsyncLocalStorage<Scope>(),
     onHookError: options.onHookError ?? defaultHookError,
     registry: options.registry as Registry | undefined,
-    owners,
     sourceLang: assertLang(options.sourceLang ?? 'en_US'),
     driver: options.driver,
     keys: options.keys,

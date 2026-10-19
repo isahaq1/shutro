@@ -45,8 +45,7 @@ export type ShutroErrorCode =
   | 'CROSS_COMPANY'
   | 'MISSING_RATE'
   | 'UNKNOWN_SEQUENCE'
-  | 'ACCESS'
-  | 'APP_NOT_INSTALLED';
+  | 'ACCESS';
 
 /**
  * Base class of every error raised by `@shutro/core`. The message says what went wrong and ends with
@@ -335,24 +334,6 @@ export class UnknownExternalIdError extends ShutroError {
 export class InvalidDomainError extends ShutroError {
   constructor(problem: string, hint: string) {
     super('INVALID_DOMAIN', problem, hint);
-  }
-}
-
-/** `env.model()` on a model whose module is available to the application but not installed in this database. */
-export class AppNotInstalledError extends ShutroError {
-  /** The model asked for. */
-  readonly model: string;
-  /** The module that owns it. */
-  readonly module: string;
-
-  constructor(model: string, module: string) {
-    super(
-      'APP_NOT_INSTALLED',
-      `Model '${model}' belongs to the module '${module}', which is not installed in this database.`,
-      `Install it with "shutro apps install ${module}", or guard the code with env.apps.has('${module}').`,
-    );
-    this.model = model;
-    this.module = module;
   }
 }
 
