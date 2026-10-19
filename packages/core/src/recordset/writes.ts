@@ -508,7 +508,11 @@ export async function createRecords(
     if (field.computed) continue;
     internals.trigger(model.name, key, ids);
   }
-  for (const [key, parents] of parentsByKey) triggerParents(internals, model, key, parents);
+  for (const [key, parents] of parentsByKey) {
+    triggerParents(internals, model, key, parents);
+    // The parents' cached child lists don't hold the new records yet (a payment created for a loaded invoice).
+    for (const parent of new Set(parents)) invalidateInverseLists(host, model, key, null, parent);
+  }
   for (const f of internals.registry.compute.stored(model.name))
     internals.markToCompute(model.name, f.key, ids);
 

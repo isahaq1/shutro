@@ -389,6 +389,31 @@ describe('cache coherence', () => {
       if (!(e instanceof Error) || e.message !== 'rollback') throw e;
     });
   });
+
+  test("creating a child refreshes the parent's cached one2many list", async () => {
+    await run(async (env) => {
+      const order = (await env.model('sale.order').create([orderValues('SO-CACHE')])).first();
+      expect((await order.lines.load()).length).toBe(0); // the empty list is now cached
+      await env.model('sale.order.line').create([
+        {
+          order: order.id,
+          name: 'Created after the list was read',
+          currency: ids.bdt,
+          uom: ids.unit,
+          quantity: '1',
+          priceUnit: '10',
+          subtotal: '10',
+        },
+      ]);
+      const [reloaded] = await env.model('sale.order').browse([order.id]).load({ lines: ['name'] });
+      expect([...(reloaded?.lines ?? [])].map((l) => l.name)).toEqual([
+        'Created after the list was read',
+      ]);
+      throw new Error('rollback');
+    }).catch((e: unknown) => {
+      if (!(e instanceof Error) || e.message !== 'rollback') throw e;
+    });
+  });
 });
 
 describe('unlink', () => {
