@@ -1,9 +1,7 @@
 /**
  * @packageDocumentation
- * `@shutro/cli`: `shutro init | doctor | apps | generate | migrate | inspect`.
+ * `@shutro/cli`: `shutro init | generate | migrate | inspect`.
  */
-
-export { type AppsFlags, appsCommand, progressReporter } from './apps.js';
 export { type CliIo, runCli } from './cli.js';
 export { defineConfig, loadConfig, type ShutroConfig } from './config.js';
 export { CliError, type CliErrorCode, ConfigError, ModuleSourceError } from './errors.js';
@@ -12,6 +10,7 @@ export {
   type GenerateOptions,
   type GenerateResult,
   generate,
+  loadSources,
 } from './generate/generate.js';
 export {
   definitionsHash,
@@ -25,27 +24,4 @@ export {
 } from './generate/render.js';
 export { initProject } from './init.js';
 export { inspectModel, inspectRegistry } from './inspect.js';
-export {
-  appManaged,
-  appsOf,
-  databaseUrl,
-  loadProject,
-  type Project,
-  runningRegistry,
-  withDriver,
-} from './project.js';
-export { doctor, guidedInit, type InitFlags, redact } from './setup.js';
-export {
-  type Choice,
-  count,
-  createUi,
-  duration,
-  type Key,
-  type OutputMode,
-  outputMode,
-  SPINNER,
-  type Task,
-  type Ui,
-  type UiIo,
-  visibleWidth,
-} from './ui.js';
+export { databaseUrl, loadProject, type Project, withDriver } from './project.js';

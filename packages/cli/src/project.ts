@@ -3,7 +3,6 @@
  */
 import { buildRegistry, type ModuleBase, type Registry, toDecimal } from '@shutro/core';
 import { createDriver, type Driver } from '@shutro/driver-pg';
-import { type AppManager, createAppManager } from '@shutro/migrate';
 import { loadConfig, type ShutroConfig } from './config.js';
 import { CliError, ModuleSourceError } from './errors.js';
 import { dependant, loadSources } from './generate/generate.js';
@@ -12,7 +11,7 @@ import { dependant, loadSources } from './generate/generate.js';
 export interface Project {
   readonly config: ShutroConfig;
   readonly dir: string;
-  /** Every listed module (with its dependencies): the catalog when the config sets `install`. */
+  /** Every listed module, with its dependencies. */
   readonly registry: Registry;
   /** The listed modules. */
   readonly modules: readonly ModuleBase[];
@@ -29,27 +28,6 @@ export async function loadProject(configFile: string): Promise<Project> {
       throw new ModuleSourceError(module.name, dependant(registry, module.name));
   }
   return { config, dir, registry, modules };
-}
-
-/** True when the database's installed set decides which modules the application runs (RFC 0019 §7.3). */
-export function appManaged(project: Project): boolean {
-  return project.config.install !== undefined;
-}
-
-/** The app manager of a project on a database. */
-export function appsOf(project: Project, driver: Driver): AppManager {
-  return createAppManager({
-    driver,
-    modules: project.modules,
-    ...(project.config.retentionDays === undefined
-      ? {}
-      : { retentionDays: project.config.retentionDays }),
-  });
-}
-
-/** The registry the database runs: the installed modules when app-managed, else every listed module. */
-export async function runningRegistry(project: Project, driver: Driver): Promise<Registry> {
-  return appManaged(project) ? appsOf(project, driver).registry() : project.registry;
 }
 
 /** The database URL: `SHUTRO_DATABASE_URL`, else the config's `database`. */

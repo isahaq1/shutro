@@ -77,8 +77,8 @@ function entryIn(packageJson: string, subpath: string): string | undefined {
 }
 
 /**
- * The entry file of a module package (`'@shutro/apps'`, `'shutro/apps'`), looked up in the `node_modules` above
- * `fromDir`, then in those above the CLI itself (so a globally installed CLI finds the apps it ships with).
+ * The entry file of a module package (`'@acme/erp-modules'`, `'@acme/erp/sale'`), looked up in the `node_modules`
+ * above `fromDir`, then in those above the CLI itself (a globally installed CLI).
  *
  * @throws {ConfigError} when the package or its entry cannot be found.
  */

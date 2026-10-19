@@ -26,13 +26,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@shutro/apps": "workspace:*",
     "@shutro/core": "workspace:*",
     "@shutro/driver-pg": "workspace:*",
-    "@shutro/migrate": "workspace:*",
-    "@shutro/server": "workspace:*",
-    "@shutro/sql": "workspace:*",
-    "@shutro/web": "workspace:*"
+    "@shutro/migrate": "workspace:*"
   },
   "devDependencies": {
     "@shutro/testing": "workspace:*"

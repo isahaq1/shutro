@@ -12,7 +12,7 @@ export interface ModuleSource {
   readonly module: ModuleBase;
   readonly file: string;
   readonly exportName: string;
-  /** The package the module comes from (`'@shutro/apps'`): views import it by name, not by path. */
+  /** The package the module comes from (`'@acme/erp-modules'`): views import it by name, not by path. */
   readonly specifier?: string;
 }
 

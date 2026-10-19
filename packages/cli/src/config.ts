@@ -10,24 +10,15 @@ import { allowJsSpecifiersForTs, isPackageSpecifier, resolvePackageEntry } from 
 /** The exported config. Paths are relative to the config file. */
 export interface ShutroConfig {
   /**
-   * Module files (`./modules/sale/module.ts`, one module each) and module packages (`'@shutro/apps'`, any number of
-   * modules each). Every module in the dependency graph must be listed. With `install`, this is the catalog: the
-   * modules a database may install.
+   * Module files (`./modules/sale/module.ts`, one module each) and module packages (`'@acme/erp-modules'`, any number
+   * of modules each). Every module in the dependency graph must be listed.
    */
   readonly modules: readonly string[];
-  /**
-   * The apps a fresh database installs (RFC 0019 §7.3). Setting it makes the database's installed set authoritative:
-   * `shutro apps install | uninstall` change it, and `migrate` works on the installed modules only. Without it, every
-   * listed module is part of the application.
-   */
-  readonly install?: readonly string[];
-  /** Days an uninstalled app's data stays in quarantine before it is purged (default 30). */
-  readonly retentionDays?: number;
   /** Directory of the application view (`.shutro/` is created inside it). Omit for a module-only package. */
   readonly app?: string;
   /** Directory of the versioned SQL migrations (default `./migrations`). */
   readonly migrations?: string;
-  /** PostgreSQL URL for `migrate`, `apps` and `doctor`; `SHUTRO_DATABASE_URL` wins over it. */
+  /** PostgreSQL URL for `migrate`; `SHUTRO_DATABASE_URL` wins over it. */
   readonly database?: string;
   /** Filled by {@link loadConfig}: resolved entry file → the package specifier it came from. */
   readonly packages?: Readonly<Record<string, string>>;
@@ -48,9 +39,6 @@ function isConfig(value: unknown): value is ShutroConfig {
     c[key] === undefined || typeof c[key] === 'string';
   return (
     isStringList(c['modules']) &&
-    (c['install'] === undefined || isStringList(c['install'])) &&
-    (c['retentionDays'] === undefined ||
-      (typeof c['retentionDays'] === 'number' && c['retentionDays'] >= 0)) &&
     optionalString('app') &&
     optionalString('migrations') &&
     optionalString('database')
@@ -98,8 +86,6 @@ export async function loadConfig(file: string): Promise<{ config: ShutroConfig; 
     dir,
     config: {
       modules,
-      ...(config.install === undefined ? {} : { install: config.install }),
-      ...(config.retentionDays === undefined ? {} : { retentionDays: config.retentionDays }),
       ...(config.app === undefined
         ? {}
         : { app: isAbsolute(config.app) ? config.app : resolve(dir, config.app) }),
