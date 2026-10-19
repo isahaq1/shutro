@@ -21,14 +21,45 @@ export {
   planMigration,
   writeMigrationFile,
 } from './apply.js';
+export {
+  type AffectedColumn,
+  type AffectedTable,
+  type AppEvent,
+  type AppInfo,
+  type AppManager,
+  type AppManagerOptions,
+  type AppPlan,
+  type AppResult,
+  type AppStep,
+  createAppManager,
+  type InstallOptions,
+  type InstallPlan,
+  MODULES_CHANNEL,
+  type ModuleRecord,
+  type ModuleState,
+  type OperationOptions,
+  type PlannedModule,
+  type PlanReason,
+  type PurgeOptions,
+  type PurgePlan,
+  QUARANTINE_SCHEMA,
+  type UninstallOptions,
+  type UninstallPlan,
+  type UpgradeOptions,
+  type UpgradePlan,
+} from './apps.js';
 export { normalizeDefault, readLiveSchema } from './catalog.js';
 export { diffSchema, type Operation } from './diff.js';
 export {
+  AppDependentsError,
+  AppStateError,
   DestructiveMigrationError,
   MigrationChecksumError,
   MigrationError,
   type MigrationErrorCode,
   MigrationFileError,
+  UninstallBlockedError,
+  UnknownAppError,
 } from './errors.js';
 export { renderOperation, renderOperations } from './render.js';
 export {
