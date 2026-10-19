@@ -1,6 +1,7 @@
 # RFC 0020: Web client (Kosh UI)
 
-- **Status:** Accepted (2026-10-19, recommendations in §11 adopted)
+- **Status:** Withdrawn (2026-10-19): app management and the web client belong to Kosh (Kosh RFC 0008); Shutro is the ORM only. Previously Accepted (2026-10-19); steps 1-6 were removed from Shutro and the text is kept for
+  history.
 - **Date:** 2026-10-19
 - **Depends on:** 0001 (models), 0004 (recordsets), 0009 (onchange), 0010 (state machines), 0013 (audit), 0014
   (security), 0016 (aggregates), 0018 (events, history), 0019 (apps)

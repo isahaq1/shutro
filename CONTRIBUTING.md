@@ -23,8 +23,7 @@ pnpm test        # unit and integration tests against real PostgreSQL
 pnpm build
 ```
 
-Run one package's tests with `pnpm vitest run packages/<name>`. The web client builds with `pnpm --filter @shutro/web build`
-and runs against a database with `shutro init` followed by `shutro serve`.
+Run one package's tests with `pnpm vitest run packages/<name>`.
 
 ## Rules for code
 
@@ -46,7 +45,7 @@ anything that touches SQL or security.
 ## Commits and pull requests
 
 - Small, focused commits following [Conventional Commits](https://www.conventionalcommits.org/)
-  (`feat(core): …`, `fix(server): …`, `docs: …`).
+  (`feat(core): …`, `fix(migrate): …`, `docs: …`).
 - A pull request passes `pnpm typecheck`, `pnpm lint` and `pnpm test`, updates the relevant guide in `docs/guides/`,
   and adds a changeset (`pnpm changeset`) when it changes a published package.
 

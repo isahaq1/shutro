@@ -25,12 +25,12 @@ An RFC is only implemented after it has been approved and its status set to **Ac
 | 0016 | [Aggregates and amount helpers](0016-aggregates-and-amount-helpers.md) | Implemented | 0004, 0006, 0014 |
 | 0017 | [External IDs and module data](0017-external-ids-and-module-data.md) | Implemented | 0002, 0012, 0013 |
 | 0018 | [Lost-update protection, transactional events, jobs and history](0018-concurrency-events-jobs-history.md) | Implemented | 0003, 0004, 0013 |
-| 0019 | [Apps, guided installer, and module install/uninstall](0019-apps-installer-and-lifecycle.md) | Implemented | 0002, 0013, 0014, 0017 |
-| 0020 | [Web client (Kosh UI)](0020-web-client.md) | Accepted | 0001, 0004, 0009, 0010, 0013, 0014, 0016, 0018, 0019 |
+| 0019 | [Apps, guided installer, and module install/uninstall](0019-apps-installer-and-lifecycle.md) | Withdrawn (moved to Kosh RFC 0008) | 0002, 0013, 0014, 0017 |
+| 0020 | [Web client (Kosh UI)](0020-web-client.md) | Withdrawn (moved to Kosh RFC 0008) | 0001, 0004, 0009, 0010, 0013, 0014, 0016, 0018, 0019 |
 
 ## Lifecycle
 
-`Draft` → `In review` → `Accepted` → `Implemented` (or `Rejected` / `Superseded by NNNN`).
+`Draft` → `In review` → `Accepted` → `Implemented` (or `Rejected` / `Withdrawn` / `Superseded by NNNN`).
 
 - Changing an **Accepted** RFC requires a new revision section at the bottom, or a superseding RFC.
 - When an RFC is implemented, tick the matching roadmap checkbox in `CLAUDE.md`.

@@ -1,5 +1,8 @@
 # Feedback from building `examples/erp-demo`
 
+> The example and the official apps mentioned below were removed from Shutro on 2026-10-19 (business apps belong to
+> Kosh). This log is kept for the ORM findings and their fixes.
+
 Pain points hit while building the partner, product, sale and invoice modules entirely on Shutro (and, earlier, the
 engine's own test fixtures and benchmarks), written as issues ready to file. **Fixed** issues were found and fixed
 during the work; their commits are named. **Open** issues are ordered by how much they hurt.

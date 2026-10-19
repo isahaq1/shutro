@@ -45,11 +45,9 @@ packages/
   audit/       # append-only change tracking
   sequence/    # concurrency-safe document numbering
   i18n/        # translatable JSONB fields
-  apps/        # official apps: settings, account, sale, purchase, project (+ base, partner, product, glue)
-  cli/         # shutro init | doctor | apps | migrate | generate | inspect
+  cli/         # shutro init | migrate | generate | inspect
   testing/     # test helpers, Testcontainers setup, factories
-examples/
-  erp-demo/    # real ERP modules (partner, product, sale, invoice) used as integration tests
+benchmarks/    # query budgets and timings, run in CI
 docs/
   rfcs/        # design documents — written BEFORE implementation
 ```
@@ -79,6 +77,12 @@ reporting performance.
 ## Out of scope
 
 Other databases, browser/mobile/embedded use, non-business app patterns.
+
+**Apps, the app installer and the web client are Kosh's, not Shutro's** (decided 2026-10-19, Kosh RFC 0008).
+Shutro is only the ORM: no business apps (settings, accounting, sales, ...), no app catalog, install / uninstall /
+quarantine of apps, guided installer, HTTP server, sign-in or web UI. RFCs 0019 and 0020 are withdrawn for this
+reason. Shutro provides the building blocks Kosh needs for them (modules, registry, `useRegistry`, migrations,
+module data, metadata).
 
 ## Target API (as decided in RFCs 0001–0006)
 
@@ -201,12 +205,8 @@ await shutro.run({ user, company }, async (env) => {
 - [x] Benchmarks in CI (benchmarks/: query budgets as the gate, timings uploaded)
 
 ### Phase 6 — Proof
-- [x] `examples/erp-demo`: partner, product, sale, invoice modules built on Shutro (pain points in docs/feedback.md)
+- [x] `examples/erp-demo`: partner, product, sale, invoice modules built on Shutro (pain points in docs/feedback.md; the example was removed on 2026-10-19 — business modules live in Kosh)
 
-### Phase 7 — Apps (RFC 0019)
-- [x] App metadata on modules (application, autoInstall, required, SVG icon, glyph, category, summary, uninstall blockers)
-- [x] Installed set per database: `createAppManager` with atomic install / uninstall / upgrade / purge, quarantine and restore, operation log; `env.apps`, `AppNotInstalledError`, `useRegistry`, `attach`
-- [x] Official apps (`@shutro/apps`): Settings, Accounting (invoices, bills, payments), Sales, Purchase, Project, and glue modules
-- [x] CLI: guided `shutro init` (default apps), `shutro apps *`, `shutro doctor`; fancy / plain / JSON output
-- [ ] Port `examples/erp-demo` onto the official apps
-- [ ] Generated union of module names for `env.apps.has()`
+### ~~Phase 7 — Apps (RFC 0019) and web client (RFC 0020)~~ — withdrawn 2026-10-19
+Apps, the app installer and the web client moved to Kosh (Kosh RFC 0008); their code was removed from Shutro.
+Kept: `shutro.useRegistry()` (swap the registry for new scopes).

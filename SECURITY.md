@@ -22,7 +22,7 @@ advisory credits you unless you prefer otherwise.
 ## Scope
 
 In scope: the ORM's access control (ACL, record rules, field groups, row-level security), SQL injection, the
-`@shutro/server` API (sign-in, sessions, CSRF, authorization), the audit trail's integrity, encrypted fields, and the
+audit trail's integrity, encrypted fields, and the
 CLI's handling of credentials.
 
 Out of scope: vulnerabilities that need an already-compromised database superuser or server host, denial of service

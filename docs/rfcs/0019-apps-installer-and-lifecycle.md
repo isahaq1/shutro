@@ -1,6 +1,7 @@
 # RFC 0019: Apps, guided installer, and module install/uninstall
 
-- **Status:** Implemented (accepted 2026-10-19 with the recommendations in §11; implementation notes at the end)
+- **Status:** Withdrawn (2026-10-19): app management and the web client belong to Kosh (Kosh RFC 0008); Shutro is the ORM only. Previously Implemented (accepted 2026-10-19); the code was removed from Shutro and the text is
+  kept for history.
 - **Date:** 2026-10-19
 - **Depends on:** 0002 (modules), 0014 (security), 0017 (module data), migrate package
 - **Answers:** RFC 0002 §11 open question 1 and §12 "runtime module install/uninstall"

@@ -4,9 +4,11 @@
 ERP workloads: type-safe, secure by default, modular, multi-company, multi-currency, audit-ready and fast at scale.
 It is the data layer of the Kosh ERP framework.
 
-> **Status: alpha (0.x).** The engine is tested end to end against real PostgreSQL (600+ tests, an ERP demo with
-> partner, product, sale and invoice modules), but the API may still change between minor versions. Known gaps are
-> tracked in [`docs/feedback.md`](docs/feedback.md).
+Shutro is **only the ORM**. Business apps, installing and uninstalling apps, and the web client belong to the
+Kosh framework.
+
+> **Status: alpha (0.x).** The engine is tested end to end against real PostgreSQL (600+ tests), but the API may
+> still change between minor versions. Known gaps are tracked in [`docs/feedback.md`](docs/feedback.md).
 
 ```sh
 npm install shutro
@@ -38,21 +40,16 @@ Requirements: Node.js ≥ 24, PostgreSQL ≥ 14.
 - **Typed definitions**: `shutro generate` writes per-module bindings, so computes, checks, onchange handlers and
   methods are typed with no casts.
 - **Migrations**: schema diff against the live catalog, versioned migration files, destructive-change guard.
-- **Apps**: Settings, Accounting, Sales, Purchase and Project out of the box. Install and uninstall apps at runtime
-  in one transaction each; an uninstalled app's data is kept in quarantine for 30 days and comes back on reinstall
-  ([guide](docs/guides/apps.md)).
-- **Tooling**: `shutro init | doctor | apps | migrate | generate | inspect`, dev-mode query inspector with N+1
+- **Tooling**: `shutro init | migrate | generate | inspect`, dev-mode query inspector with N+1
   warnings, COPY bulk loads, partitioned tables, CI benchmarks.
 
 ## Quick start
 
 ```sh
-npx shutro init my-erp      # asks a few questions, creates the database, installs the five default apps
-cd my-erp && npm install
-npx shutro apps             # what is installed; "shutro apps install | uninstall <app>" changes it
+npx shutro init my-erp      # shutro.config.ts, a base module and a migrations directory
 ```
 
-Or use the ORM alone (`npx shutro init --minimal`):
+Then define models and modules:
 
 ```ts
 import { buildRegistry, createShutro, defineModel, defineModule, f } from 'shutro';
@@ -72,14 +69,13 @@ await shutro.run({ user: 1, company: 1, groups: ['base.user'] }, async (env) => 
 });
 ```
 
-Entry points: `shutro` (core), `shutro/sql`, `shutro/driver-pg`, `shutro/migrate`, `shutro/apps`, `shutro/cli`, `shutro/security`,
+Entry points: `shutro` (core), `shutro/sql`, `shutro/driver-pg`, `shutro/migrate`, `shutro/cli`, `shutro/security`,
 `shutro/audit`, `shutro/sequence`, `shutro/i18n`.
 
 ## Documentation
 
 - Guides: [`docs/guides/`](docs/guides/)
 - Design documents (RFCs): [`docs/rfcs/`](docs/rfcs/README.md)
-- A complete example: [`examples/erp-demo`](examples/erp-demo/README.md)
 - How it compares with Odoo's ORM, including where Odoo is ahead: [`docs/odoo-comparison.md`](docs/odoo-comparison.md)
 
 ## Development
