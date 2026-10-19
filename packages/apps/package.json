@@ -27,7 +27,6 @@
     "@shutro/sql": "workspace:*"
   },
   "devDependencies": {
-    "@shutro/cli": "workspace:*",
     "@shutro/driver-pg": "workspace:*",
     "@shutro/migrate": "workspace:*",
     "@shutro/testing": "workspace:*"

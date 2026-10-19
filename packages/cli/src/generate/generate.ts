@@ -44,8 +44,11 @@ export interface GenerateResult {
   readonly modules: readonly string[];
 }
 
-/** Imports the module files of a config (one `defineModule` export each). */
-export async function loadSources(files: readonly string[]): Promise<Map<string, ModuleSource>> {
+/** Imports the module files (one `defineModule` export each) and module packages (any number) of a config. */
+export async function loadSources(
+  files: readonly string[],
+  packages: Readonly<Record<string, string>> = {},
+): Promise<Map<string, ModuleSource>> {
   const sources = new Map<string, ModuleSource>();
   for (const file of files) {
     if (!existsSync(file)) {
@@ -57,21 +60,30 @@ export async function loadSources(files: readonly string[]): Promise<Map<string,
     allowJsSpecifiersForTs();
     const ns = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
     const found = Object.entries(ns).filter(([, value]) => isModule(value));
-    if (found.length !== 1) {
+    const specifier = packages[file];
+    if (specifier === undefined ? found.length !== 1 : found.length === 0) {
       throw new ConfigError(
-        `${file} exports ${found.length} modules; expected exactly one.`,
-        'Export one `defineModule(...)` per file (models can live in other files).',
+        `${file} exports ${found.length} modules; expected ${specifier === undefined ? 'exactly one' : 'at least one'}.`,
+        specifier === undefined
+          ? 'Export one `defineModule(...)` per file (models can live in other files).'
+          : `Check that '${specifier}' is a module package (it exports defineModule results).`,
       );
     }
-    const [exportName, module] = found[0] as [string, ModuleBase];
-    const existing = sources.get(module.name);
-    if (existing !== undefined) {
-      throw new ConfigError(
-        `Module '${module.name}' is exported by both ${existing.file} and ${file}.`,
-        'List each module file once.',
-      );
+    for (const [exportName, module] of found as [string, ModuleBase][]) {
+      const existing = sources.get(module.name);
+      if (existing !== undefined) {
+        throw new ConfigError(
+          `Module '${module.name}' is exported by both ${existing.specifier ?? existing.file} and ${specifier ?? file}.`,
+          'List each module file or package once.',
+        );
+      }
+      sources.set(module.name, {
+        module,
+        file,
+        exportName,
+        ...(specifier === undefined ? {} : { specifier }),
+      });
     }
-    sources.set(module.name, { module, file, exportName });
   }
   return sources;
 }
@@ -86,7 +98,7 @@ export function dependant(registry: Registry, missing: string): string {
 /** Generates the per-module views and the application view described by `config`. */
 export async function generate(options: GenerateOptions): Promise<GenerateResult> {
   const { config, cwd } = options;
-  const sources = await loadSources(config.modules);
+  const sources = await loadSources(config.modules, config.packages);
   const all = buildRegistry({ modules: [...sources.values()].map((s) => s.module) });
   for (const module of all.modules) {
     if (!sources.has(module.name))
@@ -96,6 +108,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   const rendered: { path: string; content: string }[] = [];
   for (const module of all.modules) {
     const source = sources.get(module.name) as ModuleSource;
+    if (source.specifier !== undefined) continue; // module packages ship their own views
     const view = buildRegistry({ modules: [source.module] });
     const outDir = outDirOf(source.file);
     const title = `Schema view of module \`${module.name}\` (RFC 0002 §7.7): the models it owns or depends on, with the extensions it can see.`;

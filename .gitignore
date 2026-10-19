@@ -2,6 +2,7 @@
 !packages/cli/test/fixtures/**/.shutro/
 !examples/*/modules/*/.shutro/
 !packages/apps/src/*/.shutro/
+packages/cli/test/.projects/
 node_modules/
 dist/
 .turbo/

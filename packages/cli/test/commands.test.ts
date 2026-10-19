@@ -30,10 +30,10 @@ function io(): CliIo & { readonly out: string[]; readonly err: string[] } {
   };
 }
 
-describe('shutro init', () => {
-  test('writes a config, a base module and a migrations directory, and never overwrites', async () => {
+describe('shutro init --minimal', () => {
+  test('--minimal writes a config, a base module and a migrations directory, and never overwrites', async () => {
     const o = { ...io(), cwd: scratch };
-    expect(await runCli(['init'], o)).toBe(0);
+    expect(await runCli(['init', '--minimal'], o)).toBe(0);
     expect(o.out.join('')).toContain('shutro.config.ts');
     expect(readFileSync(join(scratch, 'shutro.config.ts'), 'utf8')).toContain(
       "modules: ['./modules/base/module.ts']",
@@ -43,7 +43,7 @@ describe('shutro init', () => {
     );
     expect(() => initProject(scratch)).toThrow(/already exist/);
     const again = { ...io(), cwd: scratch };
-    expect(await runCli(['init'], again)).toBe(2);
+    expect(await runCli(['init', '--minimal'], again)).toBe(2);
   });
 });
 

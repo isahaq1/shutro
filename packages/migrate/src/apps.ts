@@ -151,7 +151,7 @@ export interface PurgePlan {
 export type AppPlan = InstallPlan | UninstallPlan | UpgradePlan | PurgePlan;
 
 /** A unit of work reported while an operation runs. */
-export type AppStep = 'blockers' | 'restore' | 'schema' | 'data' | 'hooks' | 'quarantine' | 'drop';
+export type AppStep = 'restore' | 'schema' | 'data' | 'hooks' | 'quarantine' | 'drop';
 
 /** Progress of an operation (the CLI's `--json` lines; Kosh's progress bars). */
 export type AppEvent =
@@ -1022,9 +1022,7 @@ export function createAppManager(options: AppManagerOptions): AppManager {
         const old = registryOf(installed);
         const next = registryOf(remaining);
 
-        emit({ type: 'step', step: 'blockers', status: 'start', module: undefined });
         await blockersOf(conn, old, removed);
-        emit({ type: 'step', step: 'blockers', status: 'done', module: undefined });
 
         const own = ownership(old);
         const oldSchema = desiredSchema(old);

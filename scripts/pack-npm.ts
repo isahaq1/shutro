@@ -98,7 +98,8 @@ for (const ext of ['js', 'd.ts']) {
   const file = join(OUT, 'dist', 'cli', `packages.${ext}`);
   const text = readFileSync(file, 'utf8')
     .replace(/(CORE_PACKAGE[^=]*=\s*)'@shutro\/core'/, "$1'shutro'")
-    .replace(/(CLI_PACKAGE[^=]*=\s*)'@shutro\/cli'/, "$1'shutro/cli'");
+    .replace(/(CLI_PACKAGE[^=]*=\s*)'@shutro\/cli'/, "$1'shutro/cli'")
+    .replace(/(APPS_PACKAGE[^=]*=\s*)'@shutro\/apps'/, "$1'shutro/apps'");
   writeFileSync(file, text);
 }
 

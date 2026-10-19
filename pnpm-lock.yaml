@@ -106,9 +106,6 @@ importers:
         specifier: workspace:*
         version: link:../sql
     devDependencies:
-      '@shutro/cli':
-        specifier: workspace:*
-        version: link:../cli
       '@shutro/driver-pg':
         specifier: workspace:*
         version: link:../driver-pg
@@ -127,6 +124,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@shutro/apps':
+        specifier: workspace:*
+        version: link:../apps
       '@shutro/core':
         specifier: workspace:*
         version: link:../core
@@ -136,6 +136,9 @@ importers:
       '@shutro/migrate':
         specifier: workspace:*
         version: link:../migrate
+      '@shutro/sql':
+        specifier: workspace:*
+        version: link:../sql
     devDependencies:
       '@shutro/testing':
         specifier: workspace:*

@@ -1,10 +1,10 @@
 /**
- * Generates the per-module views of the official apps (`pnpm exec shutro generate` in this directory). The views are
- * committed and shipped, so applications get typed apps without generating someone else's sources (RFC 0002 §11.3).
+ * Generates the per-module views of the official apps (`shutro generate` in this directory). The views are committed
+ * and shipped, so applications get typed apps without generating someone else's sources (RFC 0002 §11.3).
+ *
+ * A plain object, not `defineConfig`: importing the CLI here would make the CLI and the apps depend on each other.
  */
-import { defineConfig } from '@shutro/cli';
-
-export default defineConfig({
+export default {
   modules: [
     './src/base/module.ts',
     './src/settings/module.ts',
@@ -19,4 +19,4 @@ export default defineConfig({
     './src/sale_project/module.ts',
     './src/sale_purchase/module.ts',
   ],
-});
+};

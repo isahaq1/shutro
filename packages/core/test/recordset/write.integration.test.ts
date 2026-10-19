@@ -405,7 +405,10 @@ describe('cache coherence', () => {
           subtotal: '10',
         },
       ]);
-      const [reloaded] = await env.model('sale.order').browse([order.id]).load({ lines: ['name'] });
+      const [reloaded] = await env
+        .model('sale.order')
+        .browse([order.id])
+        .load({ lines: ['name'] });
       expect([...(reloaded?.lines ?? [])].map((l) => l.name)).toEqual([
         'Created after the list was read',
       ]);
