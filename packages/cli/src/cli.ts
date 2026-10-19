@@ -26,7 +26,7 @@ import {
   withDriver,
 } from './project.js';
 import { doctor, guidedInit } from './setup.js';
-import { createUi, outputMode, type Ui } from './ui.js';
+import { createUi, type Key, outputMode, type Ui } from './ui.js';
 
 /** Where output goes, and the environment variables to read. */
 export interface CliIo {
@@ -39,6 +39,8 @@ export interface CliIo {
   readonly isTTY?: boolean;
   /** Asks a question on an interactive terminal (without it, defaults and --yes apply). */
   readonly prompt?: (question: string) => Promise<string>;
+  /** The next key press in raw mode, for arrow-key pickers (without it, pickers fall back to prompts). */
+  readonly readKey?: () => Promise<Key>;
 }
 
 const USAGE = `Usage: shutro <command> [options]

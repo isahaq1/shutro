@@ -17,7 +17,7 @@ import { CliError } from './errors.js';
 import { generate } from './generate/generate.js';
 import { APPS_PACKAGE, CLI_PACKAGE, CORE_PACKAGE } from './packages.js';
 import { appManaged, appsOf, databaseUrl, loadProject, withDriver } from './project.js';
-import { count, duration, type Ui } from './ui.js';
+import { count, duration, type Task, type Ui } from './ui.js';
 
 /** Flags of `shutro init`. */
 export interface InitFlags {
@@ -87,7 +87,7 @@ async function serverVersion(driver: Driver): Promise<string> {
 /** Connects, creating the database when the server says it does not exist. */
 async function connect(
   url: string,
-  ui: Ui,
+  task: Task,
 ): Promise<{ driver: Driver; created: boolean; version: string }> {
   const driver = createDriver({ url, max: 3 });
   try {
@@ -108,7 +108,7 @@ async function connect(
       `The database '${name}' does not exist and its name cannot be created safely.`,
       'Create it yourself (createdb), or use a lower-case snake_case name in the URL.',
     );
-  ui.live(`    ${ui.style('dim', `creating database ${name}…`)}`);
+  task.update(`Creating database ${name}…`);
   parsed.pathname = '/postgres';
   const admin = createDriver({ url: parsed.toString(), max: 1 });
   try {
@@ -169,17 +169,26 @@ export async function guidedInit(
   const started = Date.now();
   const dir = resolve(cwd, dirArg ?? '.');
   const name = basename(dir);
-  ui.line(
-    `\n${ui.style('bold', `${ui.symbols.step} Shutro`)} ${ui.style('dim', '· the ORM for business software')}\n`,
+  ui.line();
+  ui.box(
+    [
+      ui.style('bold', 'Business software, ready in a minute.'),
+      ui.style('dim', 'Database · Accounting · Sales · Purchase · Project · Settings'),
+    ],
+    { title: `${ui.mode === 'fancy' ? '✨' : ui.symbols.step} Shutro` },
   );
+  ui.line();
 
   // 1. Environment
-  if (nodeMajor() < 24)
+  const checking = ui.task('Checking Node.js');
+  if (nodeMajor() < 24) {
+    checking.fail(`Node.js ${process.versions.node} is too old`);
     throw new CliError(
       `Node.js ${process.versions.node} is too old.`,
       'Shutro needs Node.js 24 or newer.',
     );
-  ui.ok(`Node.js ${process.versions.node}`);
+  }
+  checking.done(`Node.js ${process.versions.node}`);
 
   // 2. Questions (each has a flag; without a terminal the defaults apply)
   const configFile = join(dir, 'shutro.config.ts');
@@ -200,6 +209,21 @@ export async function guidedInit(
     );
   const admin = flags.admin ?? (await ui.ask('Administrator login', 'admin'));
   let selected = (flags.apps?.split(',') ?? []).map((a) => a.trim()).filter((a) => a !== '');
+  if (selected.length === 0 && !flags.yes) {
+    // An arrow-key checklist on a terminal; the comma-separated prompt below otherwise.
+    const picked = await ui.choose(
+      'Apps',
+      applications.map((m) => ({
+        value: m.name,
+        label: m.label,
+        hint: m.summary,
+        ...(m.glyph === undefined ? {} : { glyph: m.glyph }),
+        checked: DEFAULT_APPS.includes(m.name),
+        locked: m.required,
+      })),
+    );
+    if (picked !== undefined) selected = [...picked];
+  }
   if (selected.length === 0) {
     if (ui.mode === 'fancy' && !flags.yes) {
       ui.line(`  ${ui.style('cyan', ui.symbols.ask)} Apps`);
@@ -228,7 +252,7 @@ export async function guidedInit(
     if (m.required && !selected.includes(m.name)) selected.unshift(m.name);
 
   // 3. Project files (kept when they exist: running init again resumes)
-  ui.heading('Project');
+  ui.heading('Project', '📁');
   const needsInstall = !existsSync(join(dir, 'node_modules'));
   const files: Record<string, string> = {
     'package.json': packageSource(name),
@@ -254,7 +278,7 @@ export async function guidedInit(
   if (flags.noInstall || url === undefined) {
     ui.line();
     ui.ok(ui.style('bold', 'Project files written.'));
-    ui.heading('Next');
+    ui.heading('Next', '👉');
     ui.table([
       ...(relative(cwd, dir) === '' ? [] : [[`cd ${relative(cwd, dir)}`, '']]),
       ...(needsInstall
@@ -269,10 +293,18 @@ export async function guidedInit(
   }
 
   // 4. Database
-  ui.heading('Database');
-  const { driver, created, version } = await connect(url, ui);
+  ui.heading('Database', '🐘');
+  const connecting = ui.task(`Connecting to PostgreSQL at ${where(url)}…`);
+  let connection: Awaited<ReturnType<typeof connect>>;
   try {
-    ui.ok(
+    connection = await connect(url, connecting);
+  } catch (error) {
+    connecting.fail(`Cannot reach PostgreSQL at ${where(url)}`);
+    throw error;
+  }
+  const { driver, created, version } = connection;
+  try {
+    connecting.done(
       `PostgreSQL ${version} at ${where(url)}${created ? ui.style('green', ' (database created)') : ''}`,
     );
     if (Number(version.split('.')[0]) < 16)
@@ -286,6 +318,7 @@ export async function guidedInit(
     if (plan.modules.length > 0) {
       ui.heading(
         `Install plan ${ui.style('dim', `· ${plan.modules.length} modules, ${plan.statements.length} statements`)}`,
+        '🧭',
       );
       ui.table(
         plan.modules.map((m, i) => [
@@ -305,7 +338,7 @@ export async function guidedInit(
         ui.info('Cancelled: the database was not changed. Run "shutro init" again to continue.');
         return 1;
       }
-      ui.heading('Installing');
+      ui.heading('Installing', '📦');
       const result = await apps.install(selected, {
         actor: 'cli',
         onEvent: progressReporter(ui, info),
@@ -325,6 +358,8 @@ export async function guidedInit(
       driver,
       registry: registry as Registry<SchemaOfModule<typeof base>>,
     });
+    ui.heading('Company', '🏢');
+    const setting = ui.task('Setting up the company and the administrator…');
     const made = await shutro.bootstrap({ reason: 'init' }, async (env) => {
       const out = { company: false, admin: false };
       if ((await env.model('res.company').search({ limit: 1 })).length === 0) {
@@ -343,22 +378,26 @@ export async function guidedInit(
       }
       return out;
     });
-    ui.heading('Company');
-    if (made.company) ui.ok(`${company} ${ui.style('dim', `· ${currency}`)}`);
-    else ui.info('A company already exists: kept.');
+    if (made.company) setting.done(`${company} ${ui.style('dim', `· ${currency}`)}`);
+    else setting.done('A company already exists: kept.');
     if (made.admin) ui.ok(`Administrator ${ui.style('bold', admin)}`);
     else ui.info(`User ${admin} already exists: kept.`);
 
     // 7. Summary
     const installed = (await apps.list()).filter((a) => a.state === 'installed');
+    const appsInstalled = installed.filter((a) => a.application);
     ui.line();
-    ui.ok(
-      ui.style(
-        'bold',
-        `Ready in ${duration(Date.now() - started)}. ${installed.filter((a) => a.application).length} apps, ${count(installed.length)} modules.`,
-      ),
+    ui.box(
+      [
+        ui.style(
+          'bold',
+          `${appsInstalled.length} apps, ${count(installed.length)} modules, ready in ${duration(Date.now() - started)}.`,
+        ),
+        appsInstalled.map((a) => `${ui.glyph(a.glyph)}${a.label}`).join('   '),
+      ],
+      { title: `${ui.mode === 'fancy' ? '🚀' : ui.symbols.ok} Ready`, color: 'green' },
     );
-    ui.heading('Next');
+    ui.heading('Next', '👉');
     ui.table([
       ...(relative(cwd, dir) === '' ? [] : [[`cd ${relative(cwd, dir)}`, '']]),
       ...(needsInstall

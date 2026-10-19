@@ -76,7 +76,7 @@ describe('shutro init', () => {
     expect(code).toBe(0);
     expect(o.text()).toMatch(/\[ok\] 12 modules installed in/);
     expect(o.text()).toContain('[ok] Acme Corp · BDT');
-    expect(o.text()).toMatch(/Ready in .*5 apps, 12 modules/);
+    expect(o.text()).toMatch(/\[ok\] Ready\n {4}5 apps, 12 modules, ready in /);
 
     const config = readFileSync(join(projects, 'acme', 'shutro.config.ts'), 'utf8');
     expect(config).toContain("modules: ['@shutro/apps']");

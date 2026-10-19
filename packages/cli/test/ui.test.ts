@@ -4,11 +4,25 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, test } from 'vitest';
-import { ConfigError, createUi, outputMode, redact, visibleWidth } from '../src/index.js';
+import { afterAll, describe, expect, test, vi } from 'vitest';
+import {
+  ConfigError,
+  createUi,
+  type Key,
+  outputMode,
+  redact,
+  SPINNER,
+  visibleWidth,
+} from '../src/index.js';
 import { isPackageSpecifier, resolvePackageEntry } from '../src/resolve.js';
 
-function capture(isTTY: boolean, answers: string[] = []) {
+/** Removes color sequences, so assertions read what the terminal shows. */
+function stripAnsi(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are what we strip.
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function capture(isTTY: boolean, answers: string[] = [], keys?: Key[]) {
   let out = '';
   return {
     get out() {
@@ -22,6 +36,7 @@ function capture(isTTY: boolean, answers: string[] = []) {
       out += t;
     },
     ...(answers.length === 0 ? {} : { prompt: async () => answers.shift() ?? '' }),
+    ...(keys === undefined ? {} : { readKey: async (): Promise<Key> => keys.shift() ?? 'enter' }),
   };
 }
 
@@ -41,19 +56,104 @@ describe('output mode', () => {
     ui.warn('careful');
     ui.live('progress');
     ui.line(`${ui.glyph('🛒')}purchase ${ui.bar(1, 2, 4)}`);
-    expect(io.out).toBe('  [ok] installed\n  [!] careful\npurchase ##..  1/2\n');
+    expect(io.out).toBe('  [ok] installed\n  [!] careful\npurchase ##..  50%  1/2\n');
     expect(io.out).toMatch(/^[\x20-\x7e\n]*$/);
   });
 
-  test('fancy output has glyphs, colors, and a live line that is cleared before the next line', () => {
+  test('fancy output has glyphs, colors, and a spinner line that hides the cursor until it settles', () => {
     const io = capture(true);
     const ui = createUi(io, 'fancy');
     ui.live('working');
-    ui.ok(`${ui.glyph('🛒')}purchase`);
-    expect(io.out).toContain('\r\x1b[2Kworking');
-    expect(io.out).toContain('\r\x1b[2K'); // cleared
+    expect(io.out).toContain('\x1b[?25l'); // cursor hidden while animating
+    expect(io.out).toContain('\r\x1b[2K  \x1b[36m⠋\x1b[39m working');
+    ui.ok(`${ui.glyph('🛒')}purchase`); // printed above the live line, which comes back
     expect(io.out).toContain('✔');
     expect(io.out).toContain('🛒 purchase');
+    ui.settle();
+    expect(io.out.endsWith('\r\x1b[2K\x1b[?25h')).toBe(true); // cleared, cursor shown
+  });
+
+  test('the spinner animates every 80 ms and stops when settled', () => {
+    vi.useFakeTimers();
+    try {
+      const io = capture(true);
+      const ui = createUi(io, 'fancy');
+      ui.live('installing');
+      vi.advanceTimersByTime(80 * 3);
+      for (const frame of SPINNER.slice(0, 4))
+        expect(io.out).toContain(`${frame}\x1b[39m installing`);
+      ui.settle();
+      const after = io.out.length;
+      vi.advanceTimersByTime(800);
+      expect(io.out.length).toBe(after);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('tasks end as a ✔ or ✖ line in every mode but json', () => {
+    const plain = capture(false);
+    const ui = createUi(plain, 'plain');
+    ui.task('Connecting').done('Connected');
+    ui.task('Creating').fail('Cannot create');
+    expect(plain.out).toBe('  [ok] Connected\n  [x] Cannot create\n');
+    const json = capture(false);
+    createUi(json, 'json').task('hidden').done();
+    expect(json.out).toBe('');
+  });
+
+  test('boxes and the progress bar', () => {
+    const io = capture(true);
+    const ui = createUi(io, 'fancy');
+    ui.box(['5 apps ready'], { title: 'Ready' });
+    const plain = stripAnsi(io.out);
+    expect(plain).toBe('  ╭─ Ready ────────╮\n  │  5 apps ready  │\n  ╰────────────────╯\n');
+    const bar = stripAnsi(ui.bar(7, 12, 10));
+    expect(bar).toBe('━━━━━╸────  58%  7/12'); // percentages right-aligned
+    expect(stripAnsi(ui.bar(12, 12, 10))).toBe('━━━━━━━━━━ 100%  12/12');
+  });
+
+  test('the arrow-key picker: move, toggle, all; required stays on', async () => {
+    const keys: Key[] = ['down', 'space', 'down', 'space', 'up', 'up', 'space', 'enter'];
+    const io = capture(true, [], keys);
+    const ui = createUi(io, 'fancy');
+    const picked = await ui.choose('Apps', [
+      { value: 'settings', label: 'Settings', checked: true, locked: true },
+      { value: 'account', label: 'Accounting', glyph: '📒', checked: true },
+      { value: 'sale', label: 'Sales', checked: false },
+    ]);
+    // down→account (off), down→sale (on), up up→settings: locked, stays on.
+    expect(picked).toEqual(['settings', 'sale']);
+    expect(io.out).toContain('\x1b[?25h'); // cursor restored
+    expect(stripAnsi(io.out)).toContain('✔ Apps Settings, Sales');
+
+    const all: Key[] = ['all', 'enter'];
+    const io2 = capture(true, [], all);
+    expect(
+      await createUi(io2, 'fancy').choose('Apps', [
+        { value: 'a', label: 'A', checked: true },
+        { value: 'b', label: 'B', checked: false },
+      ]),
+    ).toEqual(['a', 'b']);
+
+    const esc: Key[] = ['cancel'];
+    const io3 = capture(true, [], esc);
+    await expect(
+      createUi(io3, 'fancy').choose('Apps', [{ value: 'a', label: 'A', checked: true }]),
+    ).rejects.toThrow(/nothing was changed/);
+    expect(io3.out).toContain('\x1b[?25h');
+  });
+
+  test('without key input or a terminal, the picker steps aside', async () => {
+    expect(
+      await createUi(capture(true), 'fancy').choose('Apps', [
+        { value: 'a', label: 'A', checked: true },
+      ]),
+    ).toBeUndefined();
+    const io = capture(false, [], ['enter']);
+    expect(
+      await createUi(io, 'plain').choose('Apps', [{ value: 'a', label: 'A', checked: true }]),
+    ).toBeUndefined();
   });
 
   test('json mode prints only JSON lines', () => {

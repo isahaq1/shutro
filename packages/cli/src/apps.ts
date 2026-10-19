@@ -63,6 +63,8 @@ export function progressReporter(
 ): (event: AppEvent) => void {
   let total = 0;
   let done = 0;
+  const started = Date.now();
+  const elapsed = (): string => ui.style('dim', duration(Date.now() - started));
   const labels: Readonly<Record<AppStep, string>> = {
     restore: 'restoring data',
     schema: 'schema',
@@ -88,7 +90,7 @@ export function progressReporter(
         const glyph = ui.glyph(info.get(name)?.glyph);
         if (event.status === 'start') {
           ui.live(
-            `    ${ui.bar(done, total)}  ${ui.style('dim', `${labels[event.step]} ${name}…`)}`,
+            `${ui.bar(done, total)}  ${glyph}${ui.style('dim', `${labels[event.step]} ${name}…`)}  ${elapsed()}`,
           );
           return;
         }
@@ -102,7 +104,7 @@ export function progressReporter(
           else
             ui.ok(`${glyph}${name.padEnd(18)} ${ui.style('dim', 'data restored from quarantine')}`);
         }
-        ui.live(`    ${ui.bar(done, total)}`);
+        ui.live(`${ui.bar(done, total)}  ${elapsed()}`);
         return;
       }
     }
@@ -178,7 +180,7 @@ export async function appsCommand(
         ui.json(shown);
         return 0;
       }
-      ui.heading(flags.all ? 'Modules' : 'Apps');
+      ui.heading(flags.all ? 'Modules' : 'Apps', '🧩');
       ui.table(catalogRows(ui, shown));
       const installed = list.filter((a) => a.state === 'installed');
       ui.line(
@@ -234,13 +236,14 @@ export async function appsCommand(
       }
       ui.heading(
         `Install plan ${ui.style('dim', `· ${plan.modules.length} module(s), ${plan.statements.length} statement(s)`)}`,
+        '🧭',
       );
       ui.table(moduleRows(ui, plan.modules, info));
       if (!(await confirmed(ui, flags, 'Install?', false))) {
         ui.info('Cancelled: nothing was changed.');
         return 1;
       }
-      ui.heading('Installing');
+      ui.heading('Installing', '📦');
       const result = await apps.install(names, {
         actor: 'cli',
         onEvent: progressReporter(ui, info),
@@ -335,7 +338,7 @@ export async function appsCommand(
         ui.info('Cancelled: nothing was changed.');
         return 1;
       }
-      ui.heading('Uninstalling');
+      ui.heading('Uninstalling', '🧹');
       const result = await apps.uninstall(names, {
         cascade,
         purge: flags.purge,
@@ -367,6 +370,7 @@ export async function appsCommand(
       }
       ui.heading(
         `Upgrade plan ${ui.style('dim', `· ${plan.modules.length} module(s), ${plan.statements.length} statement(s)`)}`,
+        '🧭',
       );
       if (plan.modules.length > 0) ui.table(moduleRows(ui, plan.modules, info));
       for (const statement of plan.destructive) ui.warn(`destructive: ${statement}`);
@@ -379,7 +383,7 @@ export async function appsCommand(
         ui.info('Cancelled: nothing was changed.');
         return 1;
       }
-      ui.heading('Upgrading');
+      ui.heading('Upgrading', '⬆️');
       const result = await apps.upgrade(names.length === 0 ? undefined : names, {
         actor: 'cli',
         allowDestructive: flags.allowDestructive,

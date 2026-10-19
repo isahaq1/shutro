@@ -48,8 +48,8 @@ npx shutro init my-erp
 What `init` does, in order:
 
 1. Checks Node.js.
-2. Asks its questions. Each has a flag for scripts: `--database`, `--company`, `--currency`, `--admin`,
-   `--apps settings,account,…` and `--yes`.
+2. Asks its questions; apps are picked with ↑/↓, space and Enter. Each question has a flag for scripts:
+   `--database`, `--company`, `--currency`, `--admin`, `--apps settings,account,…` and `--yes`.
 3. Writes `package.json`, `shutro.config.ts`, `modules/`, `migrations/` and `.gitignore`. Existing files are kept.
 4. Creates the database when it is missing.
 5. Installs the apps atomically.

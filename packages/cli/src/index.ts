@@ -36,11 +36,15 @@ export {
 } from './project.js';
 export { doctor, guidedInit, type InitFlags, redact } from './setup.js';
 export {
+  type Choice,
   count,
   createUi,
   duration,
+  type Key,
   type OutputMode,
   outputMode,
+  SPINNER,
+  type Task,
   type Ui,
   type UiIo,
   visibleWidth,
