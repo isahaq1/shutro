@@ -164,3 +164,21 @@ describe('translatable fields', () => {
     });
   });
 });
+
+test('the display name of a translated record name is the text in the environment language', async () => {
+  const id = await run('en_US', async (env) => {
+    const chair = (await env.model('product.template').create([{ name: 'Chair' }])).first();
+    await chair.write({ name: { en_US: 'Chair', bn_BD: 'চেয়ার' } });
+    expect((await chair.load(['displayName'])).first().displayName).toBe('Chair');
+    await env.flush();
+    return chair.id;
+  });
+  await run('bn_BD', async (env) => {
+    const chair = (await env.model('product.template').browse([id]).load(['displayName'])).first();
+    expect(chair.displayName).toBe('চেয়ার');
+  });
+  await run('fr_FR', async (env) => {
+    const chair = (await env.model('product.template').browse([id]).load(['displayName'])).first();
+    expect(chair.displayName).toBe('Chair'); // no French text: the source language, never "[object Object]"
+  });
+});

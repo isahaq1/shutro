@@ -4,6 +4,7 @@
  * fields on load, and the assignment protocol inside computes.
  */
 
+import { resolveTranslation, type Translations } from '@shutro/i18n';
 import { compile, sql } from '@shutro/sql';
 import type { ComputedField, PathStep, Trigger } from '../compute/graph.js';
 import type { ScopeInternals } from '../env/env.js';
@@ -364,15 +365,21 @@ export async function computeFields(
     try {
       const compute = (group[0] as ComputedField).compute;
       if (compute === defaultDisplayName) {
+        // A translated record name is shown in the environment's language (its source text as the fallback).
+        const translated = model.fields[model.recName]?.translate === true;
         for (const id of ids) {
           const value = host.values(model.name, id)?.get(model.recName);
-          assignComputed(
-            host,
-            model,
-            id,
-            'displayName',
-            value === null || value === undefined ? '' : String(value),
-          );
+          const text =
+            value === null || value === undefined
+              ? ''
+              : translated && typeof value === 'object'
+                ? (resolveTranslation(
+                    value as Translations,
+                    internals.env.lang,
+                    internals.sourceLang,
+                  ) ?? '')
+                : String(value);
+          assignComputed(host, model, id, 'displayName', text);
         }
       } else {
         const records = host.recordset(model, ids);
