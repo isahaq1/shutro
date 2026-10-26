@@ -490,7 +490,7 @@ export class Env<S = unknown> {
   async emit(topic: string, payload: unknown): Promise<number> {
     const scope = internalsOf(this as unknown as Env);
     const query = <R extends Row>(q: DriverQuery) => scope.query<R>(q);
-    await ensureEventTables(this.#runtime.driver, query);
+    await this.#ensureEventTables();
     return emitEvent(query, this.#actor(), topic, payload);
   }
 
@@ -501,8 +501,17 @@ export class Env<S = unknown> {
   async enqueue(name: string, payload: unknown, options?: EnqueueOptions): Promise<number | null> {
     const scope = internalsOf(this as unknown as Env);
     const query = <R extends Row>(q: DriverQuery) => scope.query<R>(q);
-    await ensureEventTables(this.#runtime.driver, query);
+    await this.#ensureEventTables();
     return enqueueJob(query, this.#actor(), name, payload, options);
+  }
+
+  /**
+   * Makes the event and job tables on first use **outside** this transaction, through the driver: made inside it,
+   * they would vanish if it rolled back while being remembered as made, and every later emit would fail.
+   */
+  async #ensureEventTables(): Promise<void> {
+    const driver = this.#runtime.driver;
+    await ensureEventTables(driver, (q) => driver.query(q));
   }
 
   #actor(): { uid: number; companyId: number; groups: readonly string[] } {

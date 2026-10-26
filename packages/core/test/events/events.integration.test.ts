@@ -187,3 +187,41 @@ describe('jobs', () => {
     expect(done).toEqual([7]);
   });
 });
+
+describe('event tables created on first use', () => {
+  test('a first emit in a transaction that rolls back does not leave the tables unmade for later emits (request #25 of Kosh)', async () => {
+    // A database without the event tables: they are made on the first emit.
+    await driver.query({ text: 'CREATE DATABASE shutro_fresh_events', params: [] });
+    const url = new URL(pg.url);
+    url.pathname = '/shutro_fresh_events';
+    const fresh = createDriver({ url: url.toString(), max: 4, parseNumeric: toDecimal });
+    try {
+      for (const statement of createTableStatements(registry)) await fresh.query(statement);
+      await fresh.query(compile(sql`INSERT INTO res_users (login) VALUES (${'alice'})`));
+      const app = createShutro({ driver: fresh, registry });
+      await expect(
+        app.run({ user: 1, company: 1 }, async (env) => {
+          await env.emit('first.try', { n: 1 });
+          throw new Error('the request fails after emitting');
+        }),
+      ).rejects.toThrow('the request fails after emitting');
+      // The next emit and enqueue work, and only the committed event exists.
+      await app.run({ user: 1, company: 1 }, async (env) => {
+        await env.emit('second.try', { n: 2 });
+        await env.enqueue('some.job', { n: 3 });
+      });
+      const topics = await fresh.query<{ topic: string }>({
+        text: 'SELECT topic FROM shutro_outbox ORDER BY id',
+        params: [],
+      });
+      expect(topics.map((r) => r.topic)).toEqual(['second.try']);
+      const jobs = await fresh.query<{ name: string }>({
+        text: 'SELECT name FROM shutro_job',
+        params: [],
+      });
+      expect(jobs.map((r) => r.name)).toEqual(['some.job']);
+    } finally {
+      await fresh.end();
+    }
+  });
+});
