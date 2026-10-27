@@ -95,6 +95,57 @@ export async function refId<M extends string>(env: Env, model: M, id: string): P
   return (await resolveExternalId(internalsOf(env), id, model)) as Id<M>;
 }
 
+const MODULE_PART = /^[a-z0-9_]+$/;
+
+/**
+ * `env.setExternalId(model, id, externalId)` (RFC 0017 §4): names a record outside module data, as an import does
+ * (`__import__.partner_42`), so a later file can find it again with `env.refId`. The module part may not be an
+ * installed module's: those ids are its data, deleted by `loadData` when no longer declared. The record must exist
+ * and be readable in the scope. Naming the same record again does nothing; an id that names another record is
+ * refused. The row commits or rolls back with the scope's transaction.
+ * @throws {UnknownExternalIdError} for a malformed id, a module's id, an unreadable record or an id already taken
+ */
+export async function setExternalId(
+  env: Env,
+  model: string,
+  id: number,
+  externalId: string,
+): Promise<void> {
+  const internals = internalsOf(env);
+  const [module, name] = split(externalId);
+  if (!externalId.includes('.') || !MODULE_PART.test(module) || name === '')
+    throw new UnknownExternalIdError(
+      `'${externalId}' is not an external id.`,
+      'Write it as module.name, e.g. __import__.partner_42.',
+    );
+  if (internals.registry.modules.some((m) => m.name === module))
+    throw new UnknownExternalIdError(
+      `The external id '${externalId}' belongs to the module '${module}': its ids are its data.`,
+      'Use a module part no installed module has, e.g. __import__.',
+    );
+  const records = env.model(model as never) as unknown as {
+    search(q: unknown): Promise<{ readonly length: number }>;
+  };
+  const visible = await records.search({ where: { id }, limit: 1 });
+  if (visible.length === 0)
+    throw new UnknownExternalIdError(
+      `No ${model} record ${id} to name '${externalId}'.`,
+      'Name a record that exists and that the scope can read.',
+    );
+  if (!(await tableExists(internals)))
+    for (const text of DDL) await internals.query({ text, params: [] });
+  const [row] = await internals.query<{ model: string; res_id: number | string }>(
+    compile(
+      sql`INSERT INTO ${sql.id(EXTERNAL_ID_TABLE)} (module, name, model, res_id, noupdate) VALUES (${module}, ${name}, ${model}, ${id}, ${true}) ON CONFLICT (module, name) DO UPDATE SET updated_at = ${sql.id(EXTERNAL_ID_TABLE)}.updated_at RETURNING model, res_id`,
+    ),
+  );
+  if (row !== undefined && (row.model !== model || Number(row.res_id) !== id))
+    throw new UnknownExternalIdError(
+      `The external id '${externalId}' already names ${row.model} record ${row.res_id}.`,
+      'Use another name, or update that record instead.',
+    );
+}
+
 /** A stable text of declared values for checksums: refs by id, Decimals as strings, sorted keys. */
 function stable(value: unknown): unknown {
   if (isRef(value)) return { $ref: value.id };

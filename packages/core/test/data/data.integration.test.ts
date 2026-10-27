@@ -122,6 +122,36 @@ describe('loading', () => {
     });
   });
 
+  test('env.setExternalId names records outside module data; loading data leaves those ids alone', async () => {
+    const shutro = createShutro({ driver, registry: modules(BASE_V1, SALE_V1) });
+    const id = await shutro.bootstrap({ reason: 'import' }, async (env) => {
+      const eur = (await env.model('res.currency').create([{ name: 'EUR' }])).first();
+      await env.setExternalId('res.currency', eur.id, '__import__.currency_eur');
+      await env.setExternalId('res.currency', eur.id, '__import__.currency_eur'); // again: nothing changes
+      expect(await env.refId('res.currency', '__import__.currency_eur')).toBe(eur.id);
+      const bdt = await env.refId('res.currency', 'base.currency_bdt');
+      await expect(
+        env.setExternalId('res.currency', bdt, '__import__.currency_eur'),
+      ).rejects.toThrow(/already names res.currency record/);
+      await expect(env.setExternalId('res.currency', eur.id, 'base.currency_eur')).rejects.toThrow(
+        /belongs to the module 'base'/,
+      );
+      await expect(env.setExternalId('res.currency', eur.id, 'no-dot')).rejects.toBeInstanceOf(
+        UnknownExternalIdError,
+      );
+      await expect(env.setExternalId('res.currency', 999_999, '__import__.x')).rejects.toThrow(
+        /No res.currency record 999999/,
+      );
+      return eur.id;
+    });
+    await loadData(shutro);
+    expect(
+      await shutro.run({ user: 1, company: 1 }, (env) =>
+        env.refId('res.currency', '__import__.currency_eur'),
+      ),
+    ).toBe(id);
+  });
+
   test("upgrades: changed records update, noupdate records stay the users', removed ones go", async () => {
     // Users rename the company (noupdate) and delete a currency the data still declares.
     await driver.query(compile(sql`UPDATE res_company SET name = ${'Renamed by users'}`));

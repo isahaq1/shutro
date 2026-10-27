@@ -49,3 +49,13 @@ const bdt = await env.refId('res.currency', 'base.currency_bdt');   // Id<'res.c
 ```
 
 An unknown id, or a record of another model, is an `UnknownExternalIdError`.
+
+Records made outside module data, by an import for example, can be named too, so a later file finds them again:
+
+```ts
+await env.setExternalId('res.partner', partner.id, '__import__.partner_42');
+```
+
+The module part may not be an installed module's (those ids are its data, and `loadData` deletes the ones it no
+longer declares), the record must be readable in the scope, and an id that already names another record is refused.
+The row commits with the transaction.

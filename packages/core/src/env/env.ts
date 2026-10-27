@@ -11,7 +11,7 @@ import {
 import type { KeyRing, Perm, RulePerm } from '@shutro/security';
 import { InvalidSequenceError } from '@shutro/sequence';
 import { compile, sql as sqlTag } from '@shutro/sql';
-import { refId } from '../data/load.js';
+import { refId, setExternalId } from '../data/load.js';
 import {
   AccessError,
   CompanyNotAllowedError,
@@ -437,6 +437,18 @@ export class Env<S = unknown> {
   /** The id of the record with external id `id`. @throws {UnknownExternalIdError} */
   async refId<M extends ModelName<S>>(model: M, id: string): Promise<Id<M>> {
     return refId(this as unknown as Env, model, id);
+  }
+
+  /**
+   * Names record `id` of `model` with external id `externalId` outside module data (imports, RFC 0017 §4).
+   * @throws {UnknownExternalIdError} for a module's id, an unreadable record or an id naming another record
+   */
+  async setExternalId<M extends ModelName<S>>(
+    model: M,
+    id: Id<M> | number,
+    externalId: string,
+  ): Promise<void> {
+    return setExternalId(this as unknown as Env, model, Number(id), externalId);
   }
 
   /**
