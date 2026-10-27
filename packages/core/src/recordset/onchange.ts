@@ -66,6 +66,24 @@ function scalarKeys(model: AnyModel): string[] {
   return Object.keys(model.fields).filter((k) => !isX2Many(model.fields[k] as Field));
 }
 
+/**
+ * The ids of a draft's many2many after a handler sets it: a list of ids, or commands (`set`, `link`, `unlink`,
+ * `clear`) applied to its current ids. The draft keeps ids, as for given values, so computes read it like any set.
+ */
+function many2manyIds(current: readonly number[], value: unknown): number[] {
+  if (Array.isArray(value)) return value.filter((v): v is number => typeof v === 'number');
+  const commands = (value ?? {}) as Readonly<Record<string, unknown>>;
+  let list = commands['clear'] === true ? [] : [...current];
+  if (Array.isArray(commands['set'])) list = [...(commands['set'] as number[])];
+  if (Array.isArray(commands['link']))
+    for (const id of commands['link'] as number[]) if (!list.includes(id)) list.push(id);
+  if (Array.isArray(commands['unlink'])) {
+    const gone = new Set(commands['unlink'] as number[]);
+    list = list.filter((id) => !gone.has(id));
+  }
+  return list;
+}
+
 /** Writes one draft value into the cache: `null` is always allowed, everything else is normalized like a write. */
 function setDraftValue(
   model: AnyModel,
@@ -82,6 +100,15 @@ function setDraftValue(
       `'${key}' is not a field.`,
       `Fields: ${Object.keys(model.fields).join(', ')}.`,
     );
+  if (field.kind === 'many2many') {
+    values.set(
+      key,
+      value === null || value === undefined
+        ? []
+        : many2manyIds((values.get(key) as number[] | undefined) ?? [], value),
+    );
+    return;
+  }
   if (value === null || value === undefined) {
     values.set(key, null);
     return;
@@ -302,6 +329,13 @@ export async function runOnchange(
       ),
     );
 
+    // Many2many fields come back as their ids when a handler changed them (a line's taxes from its product).
+    const sets = Object.keys(model.fields).filter(
+      (k) =>
+        (model.fields[k] as Field).kind === 'many2many' && canField(internals, model, k, 'read'),
+    );
+    const setsBefore = new Map(sets.map((k) => [k, JSON.stringify(values.get(k) ?? [])]));
+
     // Handlers, cascading once per key: the draft's, then each new child row's for the fields it was given
     // (feedback #10), so a line's product handler runs inside the order being edited and sees its values.
     await runHandlers(host, model, vid, input.id ?? null, input.changed, warnings);
@@ -334,6 +368,10 @@ export async function runOnchange(
     for (const key of keys) {
       if (JSON.stringify(row?.[key] ?? null) !== JSON.stringify(beforeRow?.[key] ?? null))
         out[key] = row?.[key];
+    }
+    for (const key of sets) {
+      const now = (values.get(key) as number[] | undefined) ?? [];
+      if (JSON.stringify(now) !== setsBefore.get(key)) out[key] = [...now];
     }
     const children: Record<string, Record<string, unknown>[]> = {};
     for (const [key, ids] of childIds) {

@@ -75,7 +75,10 @@ differ from the input come back (for a new draft that includes its defaults: `on
 gives a new form its default values). Nothing is written, no sequence is consumed, and the draft is purged afterwards.
 
 Drafts understand `create`, `set` and `link` commands for x2many fields; `update` / `delete` / `unlink` are ignored
-(a form sends whole child rows). `draft.get(key)` returns ids for many2one, `Decimal` for amounts, commands for x2many.
+(a form sends whole child rows). `draft.get(key)` returns ids for many2one, `Decimal` for amounts, ids for x2many.
+A handler sets a many2many with a list of ids or with commands (`set`, `link`, `unlink`, `clear`); the draft keeps
+its ids, so computes read it like any set, and a many2many a handler changed comes back in the result as its ids
+(`values.taxes: [3, 5]`).
 
 Handlers are typed `(draft: Draft<Schema, 'sale.order'>, env: Env)` through the generated bindings; in the definition
 they take `unknown` and cast, like computes.

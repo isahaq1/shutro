@@ -106,6 +106,16 @@ export const SaleOrder = defineModel('sale.order', {
     taxRate: f.decimal({ scale: 4, required: true, default: '0.1' }),
     note: f.text(),
     lines: f.one2many('sale.order.line', 'order'),
+    /** A many2many a handler sets, and a compute that reads it (drafts keep its ids). */
+    watchers: f.many2many('res.users'),
+    watcherCount: f.integer({
+      store: true,
+      depends: ['watchers'],
+      compute(records: unknown): void {
+        for (const o of records as Iterable<{ watchers: Iterable<unknown>; watcherCount: number }>)
+          o.watcherCount = [...o.watchers].length;
+      },
+    }),
     amountTotal: f.monetary({
       currency: 'currency',
       store: true,
@@ -148,6 +158,8 @@ export const SaleOrder = defineModel('sale.order', {
       const partner = await d.record('partner');
       if (partner === null) return;
       if (partner.currency !== null) d.set('currency', partner.currency.id);
+      // A many2many set with commands: the draft keeps ids, the watcher count reads them.
+      (draft as { set(key: string, value: unknown): void }).set('watchers', { link: [1] });
       if (partner.email === null) d.warn('This partner has no email address.');
     },
     currency(draft: unknown, env: unknown): void {

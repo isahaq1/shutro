@@ -215,6 +215,18 @@ describe('onchange', () => {
     });
   });
 
+  test('a handler sets a many2many with commands: the draft keeps its ids, and computes read them', async () => {
+    await run(async (env) => {
+      const result = await env.model('sale.order').onchange({
+        values: { name: 'DRAFT', partner: ids.globex, currency: ids.bdt },
+        changed: ['partner'],
+      });
+      // Many2many fields a handler changed come back as their ids (outside the typed plain row).
+      expect((result.values as Record<string, unknown>)['watchers']).toEqual([1]);
+      expect(result.values.watcherCount).toBe(1);
+    });
+  });
+
   test('x2many create rows become virtual children with their computes; totals follow', async () => {
     await run(async (env) => {
       const result = await env.model('sale.order').onchange({
