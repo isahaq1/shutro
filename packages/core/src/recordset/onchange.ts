@@ -292,10 +292,14 @@ export async function runOnchange(
       fields: new Set(keys.filter((k) => model.columns[k] !== undefined)),
       relations: new Map(),
     });
+    // The input to compare against: a record's values and the given ones; for a new draft the given ones only, so
+    // its defaults come back (a new form shows them).
     const [beforeRow] = host.read(
       model,
       [vid],
-      keys.filter((k) => values.has(k)),
+      keys.filter((k) =>
+        input.id === undefined || input.id === null ? k in input.values : values.has(k),
+      ),
     );
 
     // Handlers, cascading once per key: the draft's, then each new child row's for the fields it was given

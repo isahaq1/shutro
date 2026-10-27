@@ -201,6 +201,20 @@ describe('onchange', () => {
     expect(await count('sale_order')).toBe(before);
   });
 
+  test('a new draft returns its defaults: they are not part of the input (a new form shows them)', async () => {
+    await run(async (env) => {
+      const blank = await env.model('sale.order').onchange({ values: {}, changed: [] });
+      expect(blank.values.dateOrder).toBe('2026-10-01');
+      expect(blank.values.taxRate).toBeDefined();
+      // A given value is the input: not echoed, even when it equals the default.
+      const given = await env
+        .model('sale.order')
+        .onchange({ values: { dateOrder: '2026-10-01' }, changed: [] });
+      expect(given.values.dateOrder).toBeUndefined();
+      expect(given.values.taxRate).toBeDefined();
+    });
+  });
+
   test('x2many create rows become virtual children with their computes; totals follow', async () => {
     await run(async (env) => {
       const result = await env.model('sale.order').onchange({

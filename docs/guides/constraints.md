@@ -71,7 +71,8 @@ result.warnings;   // ['This partner has no email address.']
 What happens: a **draft** (a virtual record in the transaction's cache, negative id) is filled with the record's
 values or the defaults, then with `values`; the handlers of `changed` run (a `set()` queues that field's handler, each
 runs at most once); the real compute engine computes the virtual child rows and then the draft; the plain values that
-differ from the input come back. Nothing is written, no sequence is consumed, and the draft is purged afterwards.
+differ from the input come back (for a new draft that includes its defaults: `onchange({ values: {}, changed: [] })`
+gives a new form its default values). Nothing is written, no sequence is consumed, and the draft is purged afterwards.
 
 Drafts understand `create`, `set` and `link` commands for x2many fields; `update` / `delete` / `unlink` are ignored
 (a form sends whole child rows). `draft.get(key)` returns ids for many2one, `Decimal` for amounts, commands for x2many.
