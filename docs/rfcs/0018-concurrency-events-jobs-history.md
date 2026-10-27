@@ -1,6 +1,6 @@
 # RFC 0018: Lost-update protection, transactional events, jobs and history
 
-- **Status:** Implemented (§7.1–7.4); §7.5 proposed 2026-10-27, waiting for approval
+- **Status:** Implemented (§7.5 accepted and implemented 2026-10-27 with the proposed answers)
 - **Related:** 0003 (transactions, retries), 0004 (writes), 0013 (audit), 0014 (security)
 
 ## 1. Summary
@@ -45,7 +45,7 @@ workers), runs each in its own `run()` scope, and retries failures with exponent
 into `<table>_history`). `env.asOf(instant).model(M)` searches and loads the model as it was at that instant, with
 the same rules and field security as current reads.
 
-### 7.5 Change events (proposed 2026-10-27, waiting for approval)
+### 7.5 Change events (accepted and implemented 2026-10-27)
 
 Requested by Kosh (its request #26): an automation engine wants to react to **any** field change of a model, after
 it committed, exactly once, without reading the audit table with a cursor (the audit trail records tracked fields
@@ -78,4 +78,9 @@ emits nothing; a write of 2 500 records emits three events; models without the o
 
 **Open questions.** The option per model (proposed), or one registry-wide switch for every model? The id limit per
 event (1 000 proposed)?
+
+**Answers.** Per model (an extension can turn it on); 1 000 ids per event. **Implemented** (`recordset/changes.ts`):
+creates report the stored keys the caller gave, writes the keys the flush wrote (a new record's stored computes
+arrive as a `write` of those keys at the same flush), unlinks the ids; the rows follow savepoints like audit rows.
+Tests: `test/events/change-events.integration.test.ts`.
 
