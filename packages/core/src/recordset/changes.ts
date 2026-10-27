@@ -20,7 +20,11 @@ export interface ChangeRow {
 /** What recording and emitting need of a scope. */
 export interface ChangeHost {
   readonly changeRows: ChangeRow[];
-  readonly env: { emit(topic: string, payload: unknown): Promise<number> };
+  readonly env: {
+    emit(topic: string, payload: unknown): Promise<number>;
+    /** Why the scope acts (`env.reason`): subscribers tell their own writes apart (loop guards). */
+    readonly reason?: string | undefined;
+  };
 }
 
 /** Records a change of `model`'s rows (a no-op unless the model asks for change events; drafts are left out). */
@@ -69,6 +73,7 @@ export async function flushChanges(host: ChangeHost): Promise<void> {
         action: entry.action,
         ids: entry.ids.slice(i, i + CHANGE_IDS_PER_EVENT),
         ...(entry.action === 'unlink' ? {} : { keys }),
+        ...(host.env.reason === undefined ? {} : { reason: host.env.reason }),
       });
   }
 }

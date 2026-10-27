@@ -81,6 +81,7 @@ event (1 000 proposed)?
 
 **Answers.** Per model (an extension can turn it on); 1 000 ids per event. **Implemented** (`recordset/changes.ts`):
 creates report the stored keys the caller gave, writes the keys the flush wrote (a new record's stored computes
-arrive as a `write` of those keys at the same flush), unlinks the ids; the rows follow savepoints like audit rows.
+arrive as a `write` of those keys at the same flush), unlinks the ids; the rows follow savepoints like audit rows. The event also names the writing scope's `reason` when it has one, so a
+subscriber recognizes its own writes (an automation rule must not fire on the changes its run made).
 Tests: `test/events/change-events.integration.test.ts`.
 

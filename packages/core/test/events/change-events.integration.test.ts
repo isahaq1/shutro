@@ -141,3 +141,12 @@ test('an extension turns it on; a large write is split into events of at most 1 
     ['x.later', 'create', 500],
   ]);
 });
+
+test('the event names the reason of the writing scope (subscribers guard against their own writes)', async () => {
+  await changes();
+  await shutro.run({ user: 1, company: 1, reason: 'automation:rule 7' }, (env) =>
+    (env.model('x.order' as never) as unknown as Ref).create([{ name: 'R' }]),
+  );
+  const [created] = await changes();
+  expect(created).toMatchObject({ action: 'create', reason: 'automation:rule 7' });
+});
