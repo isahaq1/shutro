@@ -34,6 +34,7 @@ import {
 import type { Id } from '../model/id.js';
 import { createFx, type Fx } from '../money/fx.js';
 import { trackElevation, trackSecurityChange, trackSuperuser } from '../recordset/audit.js';
+import type { ChangeRow } from '../recordset/changes.js';
 import { invalidateCached } from '../recordset/compute.js';
 import {
   companyCurrencyId,
@@ -161,6 +162,8 @@ interface RootScope {
   readonly compute: ComputeState;
   /** Pending audit rows of this attempt (RFC 0013 §7.2). */
   readonly audit: AuditRowInput[];
+  /** Pending change events of this attempt (RFC 0018 §7.5). */
+  readonly changes: ChangeRow[];
   /** Groups the audit rows of this attempt. */
   readonly tx: string;
   /** Next virtual id for drafts (negative, RFC 0009 §7.4). */
@@ -232,6 +235,8 @@ export interface ScopeInternals {
   readonly keys: KeyRing | undefined;
   /** Pending audit rows (RFC 0013 §7.2). */
   readonly auditRows: AuditRowInput[];
+  /** Pending change events (RFC 0018 §7.5). */
+  readonly changeRows: ChangeRow[];
   readonly tx: string;
   flush(model?: string): Promise<void>;
   /** Records that `(model, key)` changed for `ids` and invalidates cached dependents (RFC 0008 §7.2). */
@@ -581,6 +586,7 @@ export class Env<S = unknown> {
     const root = parent.root;
     let child: Scope | undefined;
     const auditMark = root.audit.length;
+    const changeMark = root.changes.length;
     try {
       const result = await parent.conn.savepoint(async (conn) => {
         const scope: Scope = {
@@ -615,6 +621,7 @@ export class Env<S = unknown> {
         child.status = 'rolled-back';
         if (child.journal !== undefined) undo(child.journal, root);
         root.audit.length = auditMark; // rows of a rolled-back savepoint never reach the trail
+        root.changes.length = changeMark; // nor its change events
         await runHooks(child.onRollback, this.#runtime, 'onRollback');
       }
       throw error;
@@ -711,6 +718,7 @@ export class Env<S = unknown> {
       toCompute: new Map(),
       toCheck: new Map(),
       audit: [],
+      changes: [],
       compute: {
         recomputing: false,
         computing: new Set(),
@@ -936,6 +944,7 @@ function scopeInternals(
     driver,
     keys: env.keys,
     auditRows: root.audit,
+    changeRows: root.changes,
     tx: root.tx,
     flush: (model) => flushAll(internalsOf(env), model),
     trigger(model, key, ids) {
@@ -1377,6 +1386,7 @@ export function createShutro<S = unknown>(options: ShutroOptions<S>): Shutro<S> 
                 toCompute: new Map(),
                 toCheck: new Map(),
                 audit: [],
+                changes: [],
                 tx: randomUUID(),
                 virtual: -1,
                 compute: {

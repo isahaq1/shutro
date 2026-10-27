@@ -24,6 +24,7 @@ import type { RegisteredModel, Registry } from '../registry/registry.js';
 import { targetOf } from '../registry/registry.js';
 import { type AggregateQueryRaw, runAggregate } from './aggregate.js';
 import { flushAudit, trailOf } from './audit.js';
+import { flushChanges } from './changes.js';
 import {
   assignComputed,
   type ComputeHost,
@@ -1012,6 +1013,7 @@ export async function flushAll(internals: ScopeInternals, model?: string): Promi
   await checkConstraints(computeHost(loader));
   await flushDirty(writeHost(loader), model);
   await flushAudit(internals, model);
+  await flushChanges(internals);
 }
 
 /** @internal `env.model(name)`. */

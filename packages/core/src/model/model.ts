@@ -250,6 +250,11 @@ export interface ModelDefinition<
    * `env.asOf(instant, fn)` reads the model as it was then.
    */
   readonly history?: boolean;
+  /**
+   * Emit a `record.changed` outbox event per model and action at each flush (RFC 0018 §7.5): the ids and the stored
+   * keys written, in the writing transaction.
+   */
+  readonly changeEvents?: boolean;
   readonly indexes?: readonly IndexSpec<ModelKeys<Fs, A, C>>[];
   readonly sqlConstraints?: Readonly<
     Record<string, SqlUniqueConstraint<ModelKeys<Fs, A, C>> | SqlCheckConstraint>
@@ -450,6 +455,7 @@ export interface Model<N extends string, Fs extends FieldsRecord, Ms extends Met
   readonly hierarchy: HierarchySpec<keyof Fs & string> | undefined;
   readonly delegates: readonly (keyof Fs & string)[];
   readonly history: boolean;
+  readonly changeEvents: boolean;
   readonly indexes: readonly ResolvedIndex<keyof Fs & string>[];
   readonly sqlConstraints: readonly ResolvedSqlConstraint<keyof Fs & string>[];
   readonly constraints: readonly ResolvedConstraint[];
@@ -1110,6 +1116,7 @@ export function defineModel<
     hierarchy: hierarchy === undefined ? undefined : Object.freeze({ ...hierarchy }),
     delegates: Object.freeze(delegates),
     history: definition.history === true,
+    changeEvents: definition.changeEvents === true,
     indexes: Object.freeze(indexes),
     sqlConstraints: Object.freeze(sqlConstraints),
     constraints: Object.freeze(constraints),

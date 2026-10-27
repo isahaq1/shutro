@@ -85,6 +85,8 @@ export interface ExtensionDefinition<Fs extends FieldsRecord, Ms extends Methods
   >;
   readonly indexes?: readonly IndexSpec<string>[];
   readonly tracking?: readonly string[];
+  /** Turn on change events for the model (RFC 0018 §7.5); an extension cannot turn them off. */
+  readonly changeEvents?: boolean;
 }
 
 /** An extension as `extendModel` returns it. `fields` / `methods` carry types for the registry's schema view. */
@@ -110,6 +112,7 @@ export interface Extension<
   >;
   readonly indexes: readonly IndexSpec<string>[];
   readonly tracking: readonly string[];
+  readonly changeEvents: boolean;
 }
 
 /** Any extension. */
@@ -233,6 +236,7 @@ export function extendModel<
     sqlConstraints: Object.freeze({ ...(definition.sqlConstraints ?? {}) }),
     indexes: Object.freeze([...(definition.indexes ?? [])]),
     tracking: Object.freeze([...(definition.tracking ?? [])]),
+    changeEvents: definition.changeEvents === true,
   });
   extensions.add(extension);
   return extension;

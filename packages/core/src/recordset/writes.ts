@@ -13,6 +13,7 @@ import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { targetOf } from '../registry/registry.js';
 import { trackChange, trackedKeys, trackSnapshot } from './audit.js';
+import { recordChange } from './changes.js';
 import { junctionTable } from './relations.js';
 import {
   assertAccess,
@@ -501,6 +502,16 @@ export async function createRecords(
   prepared.forEach((p, i) => {
     trackSnapshot(internals, model, ids[i] as number, 'create', p.stored);
   });
+  recordChange(
+    internals,
+    model,
+    'create',
+    ids,
+    // The stored fields the caller gave (defaults and the bookkeeping columns are not "changes" of interest).
+    [...new Set(input.flatMap((row) => Object.keys(row)))].filter(
+      (key) => model.columns[key] !== undefined && !(model.fields[key] as Field).computed,
+    ),
+  );
 
   // Triggers: every stored value of a new record "changed"; its own stored computes are computed at the next flush point.
   for (const key of columns) {
@@ -775,6 +786,7 @@ export async function unlinkRecords(
     const absent = chunk.filter((id) => !deleted.has(id));
     if (absent.length > 0) throw new MissingRecordError(model.name, absent);
   }
+  recordChange(internals, model, 'unlink', ids);
   for (const id of ids) {
     const values = host.values(model.name, id);
     if (values !== undefined) trackSnapshot(internals, model, id, 'unlink', values);
@@ -1037,6 +1049,7 @@ export async function flushDirty(host: WriteHost, modelName?: string): Promise<v
         const updated = new Set(rows.map((r) => Number(r.id)));
         const absent = chunk.filter((id) => !updated.has(id));
         if (absent.length > 0) throw new MissingRecordError(name, absent);
+        recordChange(internals, model, 'write', chunk, group.fields);
         for (const id of chunk) {
           const values = host.values(name, id);
           values?.set('updatedAt', internals.now);

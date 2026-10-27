@@ -275,6 +275,7 @@ interface Draft {
   readonly sqlConstraints: Record<string, SqlUniqueConstraint<string> | SqlCheckConstraint>;
   readonly indexes: IndexSpec<string>[];
   readonly tracking: string[];
+  changeEvents: boolean;
 }
 
 function draftOf(model: AnyModel, module: string): Draft {
@@ -302,6 +303,7 @@ function draftOf(model: AnyModel, module: string): Draft {
     >,
     indexes: [...(def.indexes ?? [])] as IndexSpec<string>[],
     tracking: [...(def.tracking ?? [])],
+    changeEvents: def.changeEvents === true,
   };
 }
 
@@ -577,6 +579,7 @@ function applyExtension(
   }
   draft.indexes.push(...ext.indexes);
   for (const key of ext.tracking) if (!draft.tracking.includes(key)) draft.tracking.push(key);
+  if (ext.changeEvents) draft.changeEvents = true;
   draft.extensions.push(module);
 }
 
@@ -594,6 +597,7 @@ function finalize(draft: Draft): RegisteredModel {
     sqlConstraints: draft.sqlConstraints,
     indexes: draft.indexes,
     tracking: draft.tracking,
+    changeEvents: draft.changeEvents,
   } as never) as unknown as AnyModel;
   const fieldOrigins: Record<string, string> = {};
   for (const key of Object.keys(model.fields))
