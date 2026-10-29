@@ -59,9 +59,11 @@ import {
   administratorCodes,
   changeStatement,
   closureWith,
+  describeRuntimeSecurity,
   isAdministratorWith,
   loadRuntimeSecurity,
   type RuntimeSecurity,
+  type RuntimeSecurityDescription,
   SECURITY_CHANNEL,
   type SecurityChange,
   validateChange,
@@ -457,8 +459,7 @@ export class Env<S = unknown> {
    * registry, audited, and reloaded by every process once committed. Needs `createShutro({ runtimeSecurity: true })`.
    */
   get securityAdmin(): SecurityAdmin {
-    const apply = async (change: SecurityChange): Promise<void> => {
-      const scope = internalsOf(this as unknown as Env);
+    const allowed = (): void => {
       if (!this.#runtime.security.enabled)
         throw new InvalidIdentityError(
           'Runtime security is not enabled.',
@@ -466,9 +467,13 @@ export class Env<S = unknown> {
         );
       if (!this.su && !this.administrator)
         throw new AccessError('security', 'manage', {
-          problem: 'only administrators can change roles, access and rules.',
+          problem: 'only administrators can read or change roles, access and rules.',
           hint: 'Use an administrator account (defineGroup({ administrator: true })).',
         });
+    };
+    const apply = async (change: SecurityChange): Promise<void> => {
+      const scope = internalsOf(this as unknown as Env);
+      allowed();
       // Read through this transaction: roles saved earlier in it count.
       const overlay = await loadRuntimeSecurity({
         query: <R extends Row>(q: DriverQuery) => scope.query<R>(q),
@@ -482,6 +487,14 @@ export class Env<S = unknown> {
       });
     };
     return {
+      describe: async (): Promise<RuntimeSecurityDescription> => {
+        allowed();
+        const scope = internalsOf(this as unknown as Env);
+        // Through this transaction: changes made earlier in it show.
+        return describeRuntimeSecurity({
+          query: <R extends Row>(q: DriverQuery) => scope.query<R>(q),
+        });
+      },
       saveRole: (role) => apply({ kind: 'role', ...role }),
       deleteRole: (code) => apply({ kind: 'deleteRole', code }),
       setAccess: (role, model, perms) => apply({ kind: 'access', role, model, perms }),
@@ -1094,6 +1107,11 @@ export interface BootstrapOptions {
 
 /** `env.securityAdmin` (RFC 0014 §7.10). */
 export interface SecurityAdmin {
+  /**
+   * The runtime additions as stored: roles, model access, record rules, permission grants and field groups (code
+   * declarations are in the registry). Read through this transaction.
+   */
+  describe(): Promise<RuntimeSecurityDescription>;
   /** Creates or updates a runtime role. */
   saveRole(role: {
     readonly code: string;

@@ -148,6 +148,81 @@ export async function loadRuntimeSecurity(driver: Pick<Driver, 'query'>): Promis
   });
 }
 
+/** The runtime additions as plain lists, for administration screens (RFC 0014 §7.10). */
+export interface RuntimeSecurityDescription {
+  readonly roles: readonly RuntimeRole[];
+  readonly access: readonly {
+    readonly role: string;
+    readonly model: string;
+    readonly perms: readonly Perm[];
+  }[];
+  readonly rules: readonly RuntimeRule[];
+  readonly permissions: readonly { readonly role: string; readonly permission: string }[];
+  readonly fields: readonly {
+    readonly model: string;
+    readonly field: string;
+    readonly read: readonly string[];
+    readonly write: readonly string[];
+  }[];
+}
+
+/** Reads the runtime additions as stored (creating the tables on first use), ordered for display. */
+export async function describeRuntimeSecurity(
+  driver: Pick<Driver, 'query'>,
+): Promise<RuntimeSecurityDescription> {
+  for (const text of DDL) await driver.query({ text, params: [] });
+  // One after the other: one transaction, one connection.
+  const roles = await driver.query<{
+    code: string;
+    label: string;
+    implies: string[];
+    administrator: boolean;
+  }>({
+    text: 'SELECT code, label, implies, administrator FROM shutro_role ORDER BY code',
+    params: [],
+  });
+  const access = await driver.query<{ role: string; model: string; perms: string[] }>({
+    text: 'SELECT role, model, perms FROM shutro_role_access ORDER BY role, model',
+    params: [],
+  });
+  const rules = await driver.query<{
+    name: string;
+    role: string;
+    model: string;
+    perms: string[];
+    domain: Record<string, unknown>;
+  }>({
+    text: 'SELECT name, role, model, perms, domain FROM shutro_role_rule ORDER BY name',
+    params: [],
+  });
+  const permissions = await driver.query<{ role: string; permission: string }>({
+    text: 'SELECT role, permission FROM shutro_role_permission ORDER BY role, permission',
+    params: [],
+  });
+  const fields = await driver.query<{
+    model: string;
+    field: string;
+    read: string[];
+    write: string[];
+  }>({
+    text: 'SELECT model, field, read, write FROM shutro_role_field ORDER BY model, field',
+    params: [],
+  });
+  return Object.freeze({
+    roles: roles.map((r) => Object.freeze({ ...r, implies: Object.freeze([...r.implies]) })),
+    access: access.map((a) =>
+      Object.freeze({ ...a, perms: Object.freeze([...a.perms] as Perm[]) }),
+    ),
+    rules: rules.map((r) =>
+      Object.freeze({ ...r, perms: Object.freeze([...r.perms] as RulePerm[]) }),
+    ),
+    permissions: permissions.map((p) => Object.freeze({ ...p })),
+    fields: fields.map((f) =>
+      Object.freeze({ ...f, read: Object.freeze([...f.read]), write: Object.freeze([...f.write]) }),
+    ),
+  });
+}
+
 /**
  * The groups of a field with the runtime overlay (RFC 0014 §7.10): the code groups plus the roles given in the
  * overlay. A field without code groups that gets runtime roles becomes restricted to them: the one narrowing the

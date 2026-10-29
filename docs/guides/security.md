@@ -148,6 +148,14 @@ code groups becomes restricted to the given roles: the one narrowing runtime sec
 hide or lock a field without code. It applies everywhere `groups` on a field does (reads, writes, filters, grouping,
 onchange, `canField`). A role still used by field security cannot be deleted.
 
+`admin.describe()` reads the runtime additions back as stored — roles, model access, record rules, permission
+grants and field groups — through the current transaction (changes made earlier in it show), for administration
+screens; code declarations stay in the registry. Administrators and superuser scopes only, like the changes.
+
+```ts
+const { roles, access, rules, permissions, fields } = await env.securityAdmin.describe();
+```
+
 `env.access.administratorGroups()` returns the codes that make their holder an administrator (administrator groups,
 runtime administrator roles, and roles implying either): for sign-in policies such as mandatory 2FA, and for
 "keep at least one administrator" checks.

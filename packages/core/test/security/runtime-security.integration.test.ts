@@ -256,3 +256,59 @@ test('administratorGroups: code administrator groups and runtime roles that are 
     for (const code of ['x.boss', 'x.root', 'x.clerk']) await env.securityAdmin.deleteRole(code);
   });
 });
+
+test('describe: the runtime additions as stored, read through the transaction; administrators only', async () => {
+  const shutro = app();
+  const described = await shutro.run(
+    { user: 3, company: 1, groups: ['base.admin'] },
+    async (env) => {
+      const admin = env.securityAdmin;
+      await admin.saveRole({ code: 'x.auditor', label: 'Auditor', implies: ['base.user'] });
+      await admin.setAccess('x.auditor', 'x.secret', ['read']);
+      await admin.saveRule({
+        name: 'auditor_own',
+        role: 'x.auditor',
+        model: 'x.secret',
+        perms: ['read'],
+        domain: { user: { $env: 'uid' } },
+      });
+      await admin.grantPermission('x.auditor', 'x.approve');
+      await admin.setFieldGroups('x.secret', 'text', { read: ['x.auditor'] });
+      return admin.describe(); // in the same transaction: the changes above show
+    },
+  );
+  expect(described.roles).toContainEqual({
+    code: 'x.auditor',
+    label: 'Auditor',
+    implies: ['base.user'],
+    administrator: false,
+  });
+  expect(described.access).toContainEqual({
+    role: 'x.auditor',
+    model: 'x.secret',
+    perms: ['read'],
+  });
+  expect(described.rules).toContainEqual({
+    name: 'auditor_own',
+    role: 'x.auditor',
+    model: 'x.secret',
+    perms: ['read'],
+    domain: { user: { $env: 'uid' } },
+  });
+  expect(described.permissions).toContainEqual({ role: 'x.auditor', permission: 'x.approve' });
+  expect(described.fields).toContainEqual({
+    model: 'x.secret',
+    field: 'text',
+    read: ['x.auditor'],
+    write: [],
+  });
+  await expect(
+    shutro.run({ user: 1, company: 1, groups: ['base.user'] }, (env) =>
+      env.securityAdmin.describe(),
+    ),
+  ).rejects.toBeInstanceOf(AccessError);
+  await shutro.run({ user: 3, company: 1, groups: ['base.admin'] }, async (env) => {
+    await env.securityAdmin.setFieldGroups('x.secret', 'text', {});
+    await env.securityAdmin.deleteRole('x.auditor');
+  });
+});

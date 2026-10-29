@@ -352,10 +352,12 @@ export {
   targetOf,
 } from './registry/registry.js';
 export {
+  describeRuntimeSecurity,
   loadRuntimeSecurity,
   type RuntimeRole,
   type RuntimeRule,
   type RuntimeSecurity,
+  type RuntimeSecurityDescription,
   runtimeSecurityStatements,
   SECURITY_CHANNEL,
 } from './security/runtime.js';
