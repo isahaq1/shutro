@@ -65,6 +65,8 @@ import {
 } from './writes.js';
 
 const CHUNK = 1000;
+/** The alias of the parent's id in batched x2many loads: no column can have it (a target's own `parent_id` did, issue #33). */
+const PARENT_KEY = '__shutro_parent';
 
 // ------------------------------------------------------------------------------------------------ cache
 
@@ -365,20 +367,20 @@ async function fetchX2Many(
         const inverse = sql.id(target.columns[field.inverseField ?? ''] ?? '');
         rows = await loader.internals.query(
           compile(
-            sql`SELECT ${t}.${inverse} AS ${sql.id('parent_id')}, ${columns} FROM ${sourceOf(loader.internals, target)} AS ${t} WHERE ${t}.${inverse} = ANY(${chunk})${scope} ORDER BY ${order}`,
+            sql`SELECT ${t}.${inverse} AS ${sql.id(PARENT_KEY)}, ${columns} FROM ${sourceOf(loader.internals, target)} AS ${t} WHERE ${t}.${inverse} = ANY(${chunk})${scope} ORDER BY ${order}`,
           ),
         );
       } else {
         const j = junctionTable(model, field, target);
         rows = await loader.internals.query(
           compile(
-            sql`SELECT ${sql.id('rel', j.sourceColumn)} AS ${sql.id('parent_id')}, ${columns} FROM ${sql.id(j.table)} AS ${sql.id('rel')} INNER JOIN ${sql.id(target.table)} AS ${t} ON ${t}.${sql.id('id')} = ${sql.id('rel', j.targetColumn)} WHERE ${sql.id('rel', j.sourceColumn)} = ANY(${chunk})${scope} ORDER BY ${order}`,
+            sql`SELECT ${sql.id('rel', j.sourceColumn)} AS ${sql.id(PARENT_KEY)}, ${columns} FROM ${sql.id(j.table)} AS ${sql.id('rel')} INNER JOIN ${sql.id(target.table)} AS ${t} ON ${t}.${sql.id('id')} = ${sql.id('rel', j.targetColumn)} WHERE ${sql.id('rel', j.sourceColumn)} = ANY(${chunk})${scope} ORDER BY ${order}`,
           ),
         );
       }
       for (const row of rows) {
         const childId = hydrate(loader, target, row, wanted);
-        children.get(Number(row['parent_id']))?.push(childId);
+        children.get(Number(row[PARENT_KEY]))?.push(childId);
       }
     }
     for (const [parent, ids] of children)

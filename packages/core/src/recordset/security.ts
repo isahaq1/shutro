@@ -144,7 +144,10 @@ export function canField(
     field === undefined ||
     internals.env.su ||
     internals.env.administrator ||
-    !internals.registry.security.enforce
+    !internals.registry.security.enforce ||
+    // A compute is the engine's: it reads what it needs for any user (issue #34). Its result is still hidden from
+    // readers by the field's own groups: projections and onchange results filter outside the compute.
+    internals.compute.computing.size > 0
   )
     return true;
   if (fieldAllowed(fieldGroupsOf(internals, model, key), internals.env.groups, kind)) return true;
