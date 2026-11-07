@@ -524,6 +524,28 @@ export async function createRecords(
     // The parents' cached child lists don't hold the new records yet (a payment created for a loaded invoice).
     for (const parent of new Set(parents)) invalidateInverseLists(host, model, key, null, parent);
   }
+  // A computed field with an inverse is writable on create too (Kosh request #36): its given value is cached and
+  // the inverse runs for the records that gave it, as on write; the compute still runs at the flush point and
+  // should agree with what the inverse wrote.
+  const inverted = new Map<string, number[]>();
+  prepared.forEach((p, i) => {
+    for (const [key, value] of p.stored) {
+      const field = model.fields[key] as Field;
+      if (!field.computed || field.inverse === undefined) continue;
+      // Only what the caller gave (a compute's own key may be prepared with nothing given).
+      const row = input[i] as Row | undefined;
+      if (row === undefined || row[key] === undefined) continue;
+      (host.values(model.name, ids[i] as number, true) as Map<string, unknown>).set(key, value);
+      inverted.set(key, [...(inverted.get(key) ?? []), ids[i] as number]);
+    }
+  });
+  for (const [key, withValue] of inverted) {
+    const inverse = (model.fields[key] as Field).inverse as unknown as (
+      records: unknown,
+      key: string,
+    ) => unknown;
+    await inverse(host.recordset(model, withValue), key);
+  }
   for (const f of internals.registry.compute.stored(model.name))
     internals.markToCompute(model.name, f.key, ids);
 

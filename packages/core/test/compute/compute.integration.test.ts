@@ -310,6 +310,20 @@ describe('assignment and inverse', () => {
     expect(await column('sale_order', 'code', id)).toBe('RENAMED');
   });
 
+  test('creating with a computed field that has an inverse runs the inverse; the compute agrees (Kosh request #36)', async () => {
+    const id = await run(async (env) => {
+      const so = (
+        await env.model('sale.order').create([{ ...order('inv2', []), code: 'GIVEN' } as never])
+      ).first();
+      expect(so.name).toBe('given');
+      await env.flush();
+      expect(so.code).toBe('GIVEN');
+      return so.id;
+    });
+    expect(await column('sale_order', 'name', id)).toBe('given');
+    expect(await column('sale_order', 'code', id)).toBe('GIVEN');
+  });
+
   test('a required stored compute that assigns nothing is a validation error', async () => {
     flags.skipCode = true;
     await expect(
