@@ -57,7 +57,7 @@ function manifest(name: string): { version?: string; dependencies?: Record<strin
   return JSON.parse(readFileSync(join(ROOT, 'packages', name, 'package.json'), 'utf8'));
 }
 
-const version = process.argv[2] ?? '0.3.5';
+const version = process.argv[2] ?? '0.3.6';
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
