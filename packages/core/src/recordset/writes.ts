@@ -992,7 +992,14 @@ async function applyCommands(
   }
   parentValues.set(key, [...current]);
   internals.trigger(model.name, key, [parentId]);
+  // The junction table changed: a change event names the key, even when no column of the row was written (a write
+  // with scalars too merges its keys into the same event).
+  if (mode === 'write' && !sameIds(linked, current))
+    recordChange(internals, model, 'write', [parentId], [key]);
 }
+
+const sameIds = (a: readonly number[], b: ReadonlySet<number>): boolean =>
+  a.length === b.size && a.every((id) => b.has(id));
 
 // -------------------------------------------------------------------------------------------------- flush
 

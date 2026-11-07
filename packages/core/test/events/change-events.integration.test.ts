@@ -30,6 +30,7 @@ const Order = defineModel('x.order', {
     name: f.char({ required: true }),
     qty: f.integer({ default: 0 }),
     note: f.char(),
+    watchers: f.many2many('res.users', { relation: 'x_order_watcher_rel' }),
     total: f.integer({
       store: true,
       depends: ['qty'],
@@ -115,6 +116,32 @@ test('create, write (with its recompute) and unlink emit one event each, with th
   ]);
   await run((model) => model('x.order').browse(ids).unlink());
   expect(await changes()).toEqual([{ model: 'x.order', action: 'unlink', ids }]);
+});
+
+test('a write of a many2many alone emits an event naming it; an unchanged set emits nothing (Kosh request #35)', async () => {
+  await changes();
+  const ids = await run(async (model) => (await model('x.order').create([{ name: 'M' }])).ids);
+  await changes();
+  await run((model) =>
+    model('x.order')
+      .browse(ids)
+      .write({ watchers: { set: [1] } }),
+  );
+  expect(await changes()).toEqual([{ model: 'x.order', action: 'write', ids, keys: ['watchers'] }]);
+  await run((model) =>
+    model('x.order')
+      .browse(ids)
+      .write({ watchers: { set: [1] } }),
+  );
+  expect(await changes()).toEqual([]);
+  await run((model) =>
+    model('x.order')
+      .browse(ids)
+      .write({ note: 'x', watchers: { clear: true } }),
+  );
+  expect(await changes()).toEqual([
+    { model: 'x.order', action: 'write', ids, keys: ['note', 'watchers'] },
+  ]);
 });
 
 test('a rolled-back transaction emits nothing; models without the option emit nothing', async () => {
