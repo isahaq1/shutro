@@ -53,19 +53,54 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Runs `fn` as the actor of an event or job (the system for bootstrap-time work). */
+/**
+ * How many handlers may be in flight on one driver. A handler runs in a transaction — it holds a connection —
+ * and may well open another one (a `bootstrap`, a `run` as somebody else, a sequence). With as many subscribers
+ * as topics and a backlog, every connection of the pool would be held by a handler waiting for a second one:
+ * nothing would move again, requests included. At most half the pool is in flight, so each handler can have the
+ * second connection it asks for; the others wait their turn before they take one.
+ */
+export function handlerSlots(max: number | undefined): number {
+  return max === undefined ? 4 : Math.max(1, Math.floor(max / 2));
+}
+
+interface Gate {
+  free: number;
+  readonly waiting: (() => void)[];
+}
+const gates = new WeakMap<Driver, Gate>();
+
+/** Runs `fn` when a handler slot of the driver is free; the slot is given on to the next in line after it. */
+async function inSlot<T>(driver: Driver, fn: () => Promise<T>): Promise<T> {
+  let gate = gates.get(driver);
+  if (gate === undefined) {
+    gate = { free: handlerSlots(driver.max), waiting: [] };
+    gates.set(driver, gate);
+  }
+  const held = gate;
+  if (held.free > 0) held.free -= 1;
+  else await new Promise<void>((resolve) => held.waiting.push(resolve));
+  try {
+    return await fn();
+  } finally {
+    const next = held.waiting.shift();
+    if (next === undefined) held.free += 1;
+    else next(); // the slot goes straight to the next in line
+  }
+}
+
+/** Runs `fn` as the actor of an event or job (the system for bootstrap-time work), in a handler slot. */
 function asActor<T>(
   host: WorkerHost,
   actor: { uid: number; companyId: number; groups: readonly string[] },
   reason: string,
   fn: (env: Env) => Promise<T>,
 ): Promise<T> {
-  if (actor.uid === SYSTEM_UID)
-    return host.bootstrap(
-      { reason, ...(actor.companyId > 0 ? { company: actor.companyId } : {}) },
-      fn,
-    );
-  return host.run({ user: actor.uid, company: actor.companyId, groups: actor.groups, reason }, fn);
+  return inSlot(host.driver, () =>
+    actor.uid === SYSTEM_UID
+      ? host.bootstrap({ reason, ...(actor.companyId > 0 ? { company: actor.companyId } : {}) }, fn)
+      : host.run({ user: actor.uid, company: actor.companyId, groups: actor.groups, reason }, fn),
+  );
 }
 
 function loop(

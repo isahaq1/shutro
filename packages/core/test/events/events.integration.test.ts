@@ -225,3 +225,59 @@ describe('event tables created on first use', () => {
     }
   });
 });
+
+describe('handlers and the pool', () => {
+  test('more subscribers than connections, each handler opening a second transaction: everything is delivered', async () => {
+    // The pool has 8 connections. Twelve subscribers each have an event waiting, and each handler — in its own
+    // transaction — opens another one, as handlers do (a bootstrap, a run as somebody else). Without a limit on
+    // the handlers in flight, eight of them hold the eight connections and wait for a ninth for ever.
+    const topics = Array.from({ length: 12 }, (_, i) => `pool.topic.${i}`);
+    for (const topic of topics) await as(1, (env) => env.emit(topic, { topic }));
+    // A server has run system work before its workers start: the audit trail's tables are there already.
+    await shutro.bootstrap({ reason: 'the first system work of a server' }, (su) =>
+      su.model('x.note').create([{ body: 'warm' }]),
+    );
+    let inFlight = 0;
+    let most = 0;
+    const subs = topics.map((topic) =>
+      shutro.subscribe(`pool-${topic}`, topic, async (_event, env) => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        try {
+          // Something of its own first, so every handler really holds its connection…
+          await env.model('x.note').create([{ body: `seen ${topic}` }]);
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          // …then a second transaction, on another connection.
+          await shutro.bootstrap({ reason: 'a handler that needs a second connection' }, (su) =>
+            su.model('x.note').create([{ body: `told ${topic}` }]),
+          );
+        } finally {
+          inFlight -= 1;
+        }
+      }),
+    );
+    const drained = await Promise.race([
+      Promise.all(subs.map((s) => s.drain())),
+      new Promise<'stuck'>((resolve) => setTimeout(() => resolve('stuck'), 20_000)),
+    ]);
+    expect(drained).not.toBe('stuck');
+    expect(drained).toEqual(topics.map(() => 1));
+    // Never more in flight than half the pool: each could have its second connection.
+    expect(most).toBeLessThanOrEqual(4);
+    expect(most).toBeGreaterThan(1);
+    const written = await notes();
+    for (const topic of topics) {
+      expect(written).toContain(`seen ${topic}`);
+      expect(written).toContain(`told ${topic}`);
+    }
+    // Requests are served meanwhile and afterwards: the pool is whole again.
+    expect(
+      await as(1, (env) =>
+        env
+          .model('x.note')
+          .search({})
+          .then((r) => r.length),
+      ),
+    ).toBeGreaterThan(0);
+  }, 60_000);
+});

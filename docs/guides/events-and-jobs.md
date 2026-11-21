@@ -25,6 +25,16 @@ mailer.start();
   `attempts` (default 10) the event goes to `shutro_dead_event` and the subscription moves on.
 - One delivery at a time per subscription name, across processes; `NOTIFY` wakes subscribers immediately.
 
+### Handlers and the connection pool
+
+A handler runs in a transaction of its own: it holds one connection of the pool for as long as it runs. Handlers
+often open another one — a `shutro.bootstrap`, a `shutro.run` as somebody else, a sequence. With one subscriber per
+topic and a backlog of events, every connection could end up held by a handler waiting for a second one, and
+nothing would move again. So Shutro lets at most **half the pool** of handlers (events and jobs together) be in
+flight on a driver; the others wait before they take a connection. Size the pool for it: with `max: 10`, five
+handlers run at once. A handler that needs more than one extra connection at the same time (two nested
+transactions inside it) should use the `env` it is given instead.
+
 ## Jobs
 
 ```ts
