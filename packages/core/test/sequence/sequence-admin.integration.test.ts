@@ -89,6 +89,21 @@ test('a format changed for one company: its numbers change at once, the other co
   // The counter goes on: only what the number looks like changed.
   expect(await order(1)).toBe(`ORD-${yy}-003/BD`);
   expect(await order(2)).toBe('SO/00001');
+  // A preview says what a change would give, and changes nothing.
+  const previewed = await admin(1, (env) =>
+    env.sequenceAdmin.preview('sale.order', { prefix: 'X-', padding: 2 }, { next: 50 }),
+  );
+  expect([previewed.next, previewed.preview]).toEqual([50, 'X-50']);
+  // Below what the counter would issue, the preview shows the counter's own next.
+  expect(
+    (await admin(1, (env) => env.sequenceAdmin.preview('sale.order', null, { next: 1 }))).preview,
+  ).toBe('SO/00004');
+  await expect(
+    admin(1, (env) => env.sequenceAdmin.preview('sale.order', { prefix: '{week}' })),
+  ).rejects.toBeInstanceOf(InvalidSequenceError);
+  expect(
+    (await admin(1, (env) => env.sequenceAdmin.describe({ codes: ['sale.order'] })))[0]?.format,
+  ).toMatchObject({ prefix: 'ORD-{yy}-' });
   // A part left out keeps the code's.
   const partly = await admin(1, (env) => env.sequenceAdmin.setFormat('sale.order', { padding: 6 }));
   expect(partly.effective).toMatchObject({ prefix: 'SO/', suffix: '', padding: 6, reset: 'never' });

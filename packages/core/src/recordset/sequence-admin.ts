@@ -56,6 +56,15 @@ export interface SequenceAdmin {
    */
   setFormat(code: string, format: SequenceFormat | null): Promise<SequenceDescription>;
   /**
+   * What `setFormat` (and `setNext`, with `next`) would give, without changing anything: the screen's preview.
+   * @throws {InvalidSequenceError} for a format that is none
+   */
+  preview(
+    code: string,
+    format: SequenceFormat | null,
+    options?: { readonly date?: string; readonly next?: number },
+  ): Promise<SequenceDescription>;
+  /**
    * Sets the next number of the counter `date` (today) falls in.
    * @throws {ValidationError} when `next` is below the number the counter would issue now: it was used already
    */
@@ -81,6 +90,22 @@ export async function formatsOf(
   ))
     out.set(Number(row['company_id']), formatOfRow(row));
   return out;
+}
+
+/** A format's parts, each what it may be. @throws {InvalidSequenceError} */
+function checkFormat(code: string, format: SequenceFormat | null): void {
+  if (format === null) return;
+  if (format.reset !== undefined && !RESETS.includes(format.reset))
+    throw new InvalidSequenceError(
+      `Sequence '${code}': reset ${JSON.stringify(format.reset)} is unknown.`,
+      `Use one of: ${RESETS.join(', ')}.`,
+    );
+  for (const text of [format.prefix, format.suffix])
+    if (text !== undefined && (typeof text !== 'string' || text.length > 60))
+      throw new InvalidSequenceError(
+        `Sequence '${code}': a prefix or suffix is text of at most 60 characters.`,
+        'Shorten it.',
+      );
 }
 
 export function sequenceAdmin(internals: ScopeInternals): SequenceAdmin {
@@ -164,23 +189,40 @@ export function sequenceAdmin(internals: ScopeInternals): SequenceAdmin {
       if (format === null) {
         await internals.query(deleteFormatStatement(code, company));
       } else {
-        if (format.reset !== undefined && !RESETS.includes(format.reset))
-          throw new InvalidSequenceError(
-            `Sequence '${code}': reset ${JSON.stringify(format.reset)} is unknown.`,
-            `Use one of: ${RESETS.join(', ')}.`,
-          );
-        for (const text of [format.prefix, format.suffix])
-          if (text !== undefined && (typeof text !== 'string' || text.length > 60))
-            throw new InvalidSequenceError(
-              `Sequence '${code}': a prefix or suffix is text of at most 60 characters.`,
-              'Shorten it.',
-            );
+        checkFormat(code, format);
         // Validated as the definition it makes.
         withFormat(definition, format);
         await internals.query(saveFormatStatement(code, company, format));
       }
       trackSequenceChange(internals, { kind: 'format', code, company, format });
       return describeOne(code, env.today());
+    },
+    async preview(code, format, options = {}) {
+      allowed();
+      await ensureSequenceTables(internals.driver);
+      const date = day(options.date);
+      const definition = declared(code);
+      const company = companyOf(definition);
+      checkFormat(code, format);
+      const effective = withFormat(definition, format);
+      const period = periodKey(effective, date);
+      const [row] = await internals.query<{ next: number | string }>(
+        counterStatement(code, company, period),
+      );
+      const current = row === undefined ? effective.start : Number(row.next);
+      const next =
+        options.next !== undefined && Number.isSafeInteger(options.next) && options.next >= current
+          ? options.next
+          : current;
+      return {
+        code,
+        declared: definition,
+        format,
+        effective,
+        period,
+        next,
+        preview: formatNumber(effective, next, date),
+      };
     },
     async setNext(code, next, options = {}) {
       allowed();

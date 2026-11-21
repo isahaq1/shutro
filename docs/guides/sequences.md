@@ -52,6 +52,7 @@ const all = await env.sequenceAdmin.describe();           // every sequence, for
 
 await env.sequenceAdmin.setFormat('sale.order', { prefix: 'ORD-{yy}-', padding: 4, reset: 'yearly' });
 await env.sequenceAdmin.setFormat('sale.order', null);    // back to the code's
+await env.sequenceAdmin.preview('sale.order', { padding: 3 }, { next: 500 }); // what it would give; changes nothing
 
 await env.sequenceAdmin.setNext('sale.order', 500);       // the next order is …500
 await env.sequenceAdmin.setNext('account.move', 120, { date: '2026-03-10' }); // the counter of that period
