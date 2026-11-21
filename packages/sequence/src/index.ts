@@ -178,3 +178,114 @@ export function numbersFrom(
 ): number[] {
   return Array.from({ length: count }, (_, i) => first + i * definition.step);
 }
+
+// ---- formats and counters changed at runtime (Kosh request #31)
+
+/** What an administrator may change of a sequence, per company: how its numbers look and when they restart. */
+export interface SequenceFormat {
+  readonly prefix?: string | undefined;
+  readonly suffix?: string | undefined;
+  readonly padding?: number | undefined;
+  readonly reset?: SequenceReset | undefined;
+}
+
+/** The table of runtime formats (`company_id` 0: a shared sequence). A missing column value keeps the code's. */
+export const SEQUENCE_FORMAT_TABLE = 'shutro_sequence_format';
+
+/** DDL of the format table, idempotent. */
+export function sequenceFormatTableStatements(): readonly CompiledSql[] {
+  return [
+    Object.freeze({
+      text: `CREATE TABLE IF NOT EXISTS "${SEQUENCE_FORMAT_TABLE}" ("code" text NOT NULL, "company_id" bigint NOT NULL DEFAULT 0, "prefix" text, "suffix" text, "padding" integer, "reset" text, PRIMARY KEY ("code", "company_id"))`,
+      params: Object.freeze([]),
+    }),
+  ];
+}
+
+/**
+ * The definition numbers are made with: the code's, with what the administrator changed. Validated like a
+ * definition. @throws {InvalidSequenceError}
+ */
+export function withFormat(
+  definition: SequenceDefinition,
+  format: SequenceFormat | null | undefined,
+): SequenceDefinition {
+  if (format === null || format === undefined) return definition;
+  return defineSequence({
+    ...definition,
+    prefix: format.prefix ?? definition.prefix,
+    suffix: format.suffix ?? definition.suffix,
+    padding: format.padding ?? definition.padding,
+    reset: format.reset ?? definition.reset,
+  });
+}
+
+/** The runtime formats of a sequence for some companies. */
+export function formatsStatement(code: string, companies: readonly number[]): CompiledSql {
+  return compile(
+    sql`SELECT ${sql.id('company_id')}, ${sql.id('prefix')}, ${sql.id('suffix')}, ${sql.id('padding')}, ${sql.id('reset')}
+      FROM ${sql.id(SEQUENCE_FORMAT_TABLE)}
+      WHERE ${sql.id('code')} = ${code} AND ${sql.id('company_id')} = ANY(${sql.array([...companies], 'bigint')})`,
+  );
+}
+
+/** A stored format row, as read. */
+export function formatOfRow(row: Readonly<Record<string, unknown>>): SequenceFormat {
+  const text = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const padding = row['padding'];
+  return {
+    prefix: text(row['prefix']),
+    suffix: text(row['suffix']),
+    padding: padding === null || padding === undefined ? undefined : Number(padding),
+    reset: text(row['reset']) as SequenceReset | undefined,
+  };
+}
+
+/** Saves the runtime format of a sequence for a company (replacing the one there). */
+export function saveFormatStatement(
+  code: string,
+  company: number,
+  format: SequenceFormat,
+): CompiledSql {
+  return compile(
+    sql`INSERT INTO ${sql.id(SEQUENCE_FORMAT_TABLE)} (${sql.id('code')}, ${sql.id('company_id')}, ${sql.id('prefix')}, ${sql.id('suffix')}, ${sql.id('padding')}, ${sql.id('reset')})
+      VALUES (${code}, ${company}, ${format.prefix ?? null}, ${format.suffix ?? null}, ${format.padding ?? null}, ${format.reset ?? null})
+      ON CONFLICT (${sql.id('code')}, ${sql.id('company_id')})
+      DO UPDATE SET ${sql.id('prefix')} = EXCLUDED.${sql.id('prefix')}, ${sql.id('suffix')} = EXCLUDED.${sql.id('suffix')}, ${sql.id('padding')} = EXCLUDED.${sql.id('padding')}, ${sql.id('reset')} = EXCLUDED.${sql.id('reset')}`,
+  );
+}
+
+/** Removes the runtime format: the sequence is the code's again. */
+export function deleteFormatStatement(code: string, company: number): CompiledSql {
+  return compile(
+    sql`DELETE FROM ${sql.id(SEQUENCE_FORMAT_TABLE)} WHERE ${sql.id('code')} = ${code} AND ${sql.id('company_id')} = ${company}`,
+  );
+}
+
+/** The next number of a counter, if it has issued any. */
+export function counterStatement(code: string, company: number, period: string): CompiledSql {
+  return compile(
+    sql`SELECT ${sql.id('next')} FROM ${sql.id(SEQUENCE_TABLE)}
+      WHERE ${sql.id('code')} = ${code} AND ${sql.id('company_id')} = ${company} AND ${sql.id('period')} = ${period}`,
+  );
+}
+
+/**
+ * Sets the next number of a counter — never below the one it would issue now, so no number is issued twice: the
+ * statement returns no row when `next` is lower. The row is locked until the transaction ends.
+ */
+export function setCounterStatement(
+  code: string,
+  company: number,
+  period: string,
+  next: number,
+): CompiledSql {
+  return compile(
+    sql`INSERT INTO ${sql.id(SEQUENCE_TABLE)} (${sql.id('code')}, ${sql.id('company_id')}, ${sql.id('period')}, ${sql.id('next')})
+      VALUES (${code}, ${company}, ${period}, ${next})
+      ON CONFLICT (${sql.id('code')}, ${sql.id('company_id')}, ${sql.id('period')})
+      DO UPDATE SET ${sql.id('next')} = EXCLUDED.${sql.id('next')}
+      WHERE ${sql.id(SEQUENCE_TABLE)}.${sql.id('next')} <= EXCLUDED.${sql.id('next')}
+      RETURNING ${sql.id('next')}`,
+  );
+}

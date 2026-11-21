@@ -40,6 +40,7 @@ export {
   defineSequence,
   InvalidSequenceError,
   type SequenceDefinition,
+  type SequenceFormat,
   type SequenceInput,
   type SequenceReset,
 } from '@shutro/sequence';
@@ -261,6 +262,7 @@ export type { RoundingMethod } from './money/rounding.js';
 export { coalesceAudit, isTracked } from './recordset/audit.js';
 export { type JunctionTable, junctionTable } from './recordset/relations.js';
 export { modelPolicies, rlsStatements, ruleCondition } from './recordset/rls.js';
+export type { SequenceAdmin, SequenceDescription } from './recordset/sequence-admin.js';
 export { UNNUMBERED } from './recordset/sequences.js';
 export type {
   Access,

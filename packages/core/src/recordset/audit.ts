@@ -205,6 +205,22 @@ export function trackSecurityChange(internals: ScopeInternals, change: object): 
   });
 }
 
+/** A change of document numbering by an administrator (a format, a next number): what changed, in `new`. */
+export function trackSequenceChange(internals: ScopeInternals, change: object): void {
+  if (!internals.env.flags.tracking) return;
+  internals.auditRows.push({
+    ...base(internals),
+    su: internals.env.su,
+    reason: null,
+    action: 'sequence',
+    model: null,
+    recordId: null,
+    field: null,
+    old: null,
+    new: change,
+  });
+}
+
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }

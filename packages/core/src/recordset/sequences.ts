@@ -10,9 +10,12 @@ import {
   formatNumber,
   numbersFrom,
   periodKey,
+  SEQUENCE_FORMAT_TABLE,
   SEQUENCE_TABLE,
   type SequenceDefinition,
+  sequenceFormatTableStatements,
   sequenceTableStatements,
+  withFormat,
 } from '@shutro/sequence';
 import type { ScopeInternals } from '../env/env.js';
 import { UnknownSequenceError, ValidationError } from '../errors.js';
@@ -20,24 +23,29 @@ import type { Field } from '../model/field.js';
 import type { AnyModel } from '../model/model.js';
 import { trackChange } from './audit.js';
 import type { ComputeHost } from './compute.js';
+import { formatsOf } from './sequence-admin.js';
 
 /** The placeholder of a manually numbered document (RFC 0012 §7.4). */
 export const UNNUMBERED = '/';
 
 const ensured = new WeakSet<Driver>();
 
-async function ensureTable(driver: Driver): Promise<void> {
+/** Makes the counter table and the table of runtime formats on first use (outside the transaction). */
+export async function ensureSequenceTables(driver: Driver): Promise<void> {
   if (ensured.has(driver)) return;
   const [row] = await driver.query<{ present: boolean }>({
-    text: `SELECT to_regclass('${SEQUENCE_TABLE}') IS NOT NULL AS present`,
+    text: `SELECT to_regclass('${SEQUENCE_TABLE}') IS NOT NULL AND to_regclass('${SEQUENCE_FORMAT_TABLE}') IS NOT NULL AS present`,
     params: [],
   });
   if (row?.present !== true)
-    for (const statement of sequenceTableStatements()) await driver.query(statement);
+    for (const statement of [...sequenceTableStatements(), ...sequenceFormatTableStatements()])
+      await driver.query(statement);
   ensured.add(driver);
 }
 
 interface Group {
+  /** What this company's numbers are made with: the code's definition with its runtime format. */
+  readonly definition: SequenceDefinition;
   readonly company: number;
   readonly period: string;
   readonly date: string;
@@ -45,17 +53,19 @@ interface Group {
 }
 
 function groupRequests(
-  definition: SequenceDefinition,
+  declared: SequenceDefinition,
   requests: readonly { readonly company: number | null; readonly date: string }[],
+  effective: ReadonlyMap<number, SequenceDefinition>,
 ): Group[] {
   const groups = new Map<string, Group>();
   requests.forEach((request, i) => {
-    const company = definition.perCompany ? (request.company ?? 0) : 0;
+    const company = declared.perCompany ? (request.company ?? 0) : 0;
+    const definition = effective.get(company) ?? declared;
     const period = periodKey(definition, request.date);
     const key = `${company}|${period}`;
     let group = groups.get(key);
     if (group === undefined) {
-      group = { company, period, date: request.date, members: [] };
+      group = { definition, company, period, date: request.date, members: [] };
       groups.set(key, group);
     }
     group.members.push(i);
@@ -66,13 +76,19 @@ function groupRequests(
 /** Allocates one formatted number per request, in one statement per (company, period) group. */
 async function allocateNumbers(
   internals: ScopeInternals,
-  definition: SequenceDefinition,
+  declared: SequenceDefinition,
   requests: readonly { readonly company: number | null; readonly date: string }[],
 ): Promise<string[]> {
   const out: string[] = new Array(requests.length);
   if (requests.length === 0) return out;
-  await ensureTable(internals.driver);
-  for (const group of groupRequests(definition, requests)) {
+  await ensureSequenceTables(internals.driver);
+  // What an administrator changed for these companies (Kosh request #31), read in this transaction.
+  const companies = [...new Set(requests.map((r) => (declared.perCompany ? (r.company ?? 0) : 0)))];
+  const effective = new Map<number, SequenceDefinition>();
+  for (const [company, format] of await formatsOf(internals, declared.code, companies))
+    effective.set(company, withFormat(declared, format));
+  for (const group of groupRequests(declared, requests, effective)) {
+    const { definition } = group;
     const statement = allocateStatement(
       definition,
       group.company,

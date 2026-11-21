@@ -52,6 +52,7 @@ import {
   canField,
   hasPermission,
 } from '../recordset/security.js';
+import { type SequenceAdmin, sequenceAdmin } from '../recordset/sequence-admin.js';
 import { mapConstraintError } from '../recordset/sqlErrors.js';
 import type { ListLoaded, ModelName, ModelRef, RecordSet } from '../recordset/types.js';
 import type { Registry } from '../registry/registry.js';
@@ -511,6 +512,15 @@ export class Env<S = unknown> {
           write: [...(groups.write ?? [])],
         }),
     };
+  }
+
+  /**
+   * Document numbering administered at runtime (Kosh request #31): each sequence's format for the current
+   * company — prefix, suffix, padding, when it restarts — on top of the code's, and the next number of a
+   * counter, never set below one already issued. Administrators (or superuser scopes) only; audited.
+   */
+  get sequenceAdmin(): SequenceAdmin {
+    return sequenceAdmin(internalsOf(this as unknown as Env));
   }
 
   /**

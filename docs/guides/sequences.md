@@ -41,6 +41,34 @@ Build-time checks: a field's sequence code must be declared by a module the fiel
 (`UnknownSequenceError`), codes are unique across modules, a field's `gapless` must agree with the definition, and
 `dateField` must be a field of the model.
 
+## Numbering changed at runtime
+
+An administrator (or a superuser scope) changes how a company's numbers look, without a release
+(`env.sequenceAdmin`, Kosh request #31):
+
+```ts
+const all = await env.sequenceAdmin.describe();           // every sequence, for the current company
+// [{ code, declared, format, effective, period, next, preview: 'SO/00042' }, …]
+
+await env.sequenceAdmin.setFormat('sale.order', { prefix: 'ORD-{yy}-', padding: 4, reset: 'yearly' });
+await env.sequenceAdmin.setFormat('sale.order', null);    // back to the code's
+
+await env.sequenceAdmin.setNext('sale.order', 500);       // the next order is …500
+await env.sequenceAdmin.setNext('account.move', 120, { date: '2026-03-10' }); // the counter of that period
+```
+
+- A **format** is the prefix, the suffix, the padding and when the counter restarts; a part left out keeps the
+  code's. It is validated like a definition (`InvalidSequenceError`) and kept per company in
+  `shutro_sequence_format` (company 0 for a shared sequence). `gapless`, `start`, `step` and `perCompany` stay the
+  code's.
+- Allocation reads the format in the business transaction: a change counts from its commit on, in every process,
+  and is undone with its transaction.
+- **When it restarts** decides which counter a date counts in: a sequence made yearly starts a counter for the
+  year. Put the period in the prefix (`{year}`) when you do, or numbers of different years look the same.
+- **The next number** only moves forward: `setNext` refuses a number below the one the counter would issue now
+  (`ValidationError`), so no number is issued twice.
+- Every change is audited (`action: 'sequence'`, what changed in `new`).
+
 ## Pool size
 
 Standard (non-gapless) sequences allocate in a short transaction of their own, on a second connection. With a pool
