@@ -178,6 +178,30 @@ export interface RegistryOptions<Mods extends readonly ModuleBase[]> {
    * to every environment, for prototypes and for tests of other features. Never ship it off.
    */
   readonly security?: SecurityOptions;
+  /**
+   * What the audit trail records beyond what models name themselves (RFC 0013). Without it, a model's `tracking`
+   * list and its fields' `tracking: true` decide — and a model that names nothing records nothing, not even its
+   * creations and deletions.
+   */
+  readonly tracking?: TrackingOptions;
+}
+
+/** Audit-trail options of {@link buildRegistry}. */
+export interface TrackingOptions {
+  /**
+   * `'all'`: every model records its creations, changes and deletions, and every field a person or a rule sets
+   * is tracked — every stored field that is not computed, not an x2many and not encrypted. What a model tracks
+   * explicitly stays tracked whatever `except` says.
+   */
+  readonly default: 'all';
+  /**
+   * Leaves out a whole model (called with the model's name alone) or one of its fields: queues, logs and
+   * sign-in internals, secrets the server keeps, bulky values.
+   */
+  readonly except?: (
+    model: string,
+    field?: { readonly key: string; readonly kind: string },
+  ) => boolean;
 }
 
 /** Access-control options of {@link buildRegistry}. */
@@ -584,8 +608,22 @@ function applyExtension(
 }
 
 /** Rebuilds the final model from the draft through `defineModel`, so every model-level check applies to it. */
-function finalize(draft: Draft): RegisteredModel {
+function finalize(draft: Draft, tracking?: TrackingOptions): RegisteredModel {
   const def = draft.base.definition;
+  // Tracked by default (`tracking: { default: 'all' }`): what is set, not what follows from it.
+  if (tracking?.default === 'all' && tracking.except?.(draft.base.name) !== true)
+    for (const [key, raw] of Object.entries(draft.fields)) {
+      const field = raw as unknown as {
+        readonly kind: string;
+        readonly store?: boolean;
+        readonly computed?: boolean;
+        readonly encrypted?: boolean;
+      };
+      if (field.kind === 'one2many' || field.kind === 'many2many') continue;
+      if (field.store === false || field.computed === true || field.encrypted === true) continue;
+      if (tracking.except?.(draft.base.name, { key, kind: field.kind }) === true) continue;
+      if (!draft.tracking.includes(key)) draft.tracking.push(key);
+    }
   const model = defineModel(draft.base.name, {
     ...def,
     fields: draft.fields,
@@ -670,7 +708,7 @@ export function buildRegistry<const Mods extends readonly ModuleBase[]>(
   }
 
   const models = new Map<string, RegisteredModel>();
-  for (const [name, draft] of drafts) models.set(name, finalize(draft));
+  for (const [name, draft] of drafts) models.set(name, finalize(draft, options.tracking));
 
   const resolve = (fromModule: string, target: string, via: string): RegisteredModel => {
     const found = models.get(target);

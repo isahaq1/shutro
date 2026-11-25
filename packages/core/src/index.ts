@@ -351,6 +351,7 @@ export {
   type SchemaOfModule,
   type SchemaOfModules,
   type SecurityOptions,
+  type TrackingOptions,
   targetOf,
 } from './registry/registry.js';
 export {

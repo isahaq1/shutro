@@ -41,5 +41,30 @@ row never describes a change that did not happen.
 Values are stored as JSON in the plain form `read()` uses (ids, `{ amount, currency }`, ISO strings, decimal strings,
 translation maps).
 
+## Tracking everything by default
+
+A model that names no tracked field records **nothing** — not even its creations and deletions. An application
+that wants a complete activity log says so once, when it builds the registry:
+
+```ts
+const registry = buildRegistry({
+  modules,
+  tracking: {
+    default: 'all',
+    // Left out: a whole model (called with its name alone), or one of its fields.
+    except: (model, field) => model.startsWith('auth.') || field?.kind === 'binary',
+  },
+});
+```
+
+With `default: 'all'`, every model records its creations, changes and deletions, and every field **that is set**
+is tracked: every stored field that is not computed (what follows from other fields is not a change of its own),
+not an x2many (the lines record themselves) and not encrypted. `except` leaves out queues, logs, sign-in internals,
+secrets and bulky values. What a model tracks explicitly — its `tracking` list, `tracking: true` on a field, a
+computed total — stays tracked whatever `except` says.
+
+The cost: one row per changed field, and a snapshot per created or deleted record, written in the same transaction.
+Imports and migrations still turn it off with the flag below.
+
 `env.withFlags({ tracking: false })` turns collection off for imports and migrations. `readTrail(runner, filter)` in
 `@shutro/audit` reads any slice of the trail (by model, records, field, user, action, time) for timelines and reports.
